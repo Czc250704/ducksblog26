@@ -1,0 +1,8 @@
+node_modules/
+data/
+storage/pending/*
+storage/approved/*
+!storage/pending/.gitkeep
+!storage/approved/.gitkeep
+!storage/approved/music/.gitkeep
+.env

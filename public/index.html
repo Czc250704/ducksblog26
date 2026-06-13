@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duck's Blog - Public Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-50 text-gray-800 antialiased">
+
+  <!-- ===== 进入动画 ===== -->
+  <div id="entry-overlay">
+    <div class="entry-text public-studio">Public Studio</div>
+    <div class="entry-text ducks-blog">Duck's Blog</div>
+  </div>
+
+  <!-- ===== Dock 导航栏 ===== -->
+  <nav id="dock-bar">
+    <div class="dock-item" data-action="about" title="关于我们">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      <span class="dock-label">关于</span>
+    </div>
+    <div class="dock-item" data-action="contact" title="联系我们">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+      </svg>
+      <span class="dock-label">联系</span>
+    </div>
+    <div class="dock-item" data-action="contribute" title="成为贡献者">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span class="dock-label">贡献</span>
+    </div>
+    <div class="dock-divider"></div>
+    <div class="dock-item" data-action="files" title="文件列表">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+      </svg>
+      <span class="dock-label">文件</span>
+    </div>
+  </nav>
+
+  <!-- ===== 主界面 ===== -->
+  <div id="main-interface">
+
+    <!-- 头部 -->
+    <header class="site-header">
+      <h1>Duck's Blog · Public Studio</h1>
+      <div class="flex items-center gap-3">
+        <button id="login-btn" class="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition-colors">登录</button>
+        <div id="user-info" class="hidden flex items-center gap-3">
+          <span id="username-display" class="text-sm text-gray-600"></span>
+          <button id="admin-toggle" class="hidden px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition-colors">管理</button>
+          <button id="logout-btn" class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-300 transition-colors">登出</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 左侧主内容 -->
+    <main class="main-content">
+      <!-- 分类标签 -->
+      <div id="category-tabs" class="mb-4">
+        <span id="category-all-tab" class="category-tab active" onclick="App.currentCategory=null;App.loadFiles();document.querySelectorAll('.category-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">全部</span>
+      </div>
+
+      <!-- 文件列表 -->
+      <div id="file-list">
+        <div class="empty-state">加载中...</div>
+      </div>
+    </main>
+
+    <!-- 右侧边栏 -->
+    <aside class="right-sidebar">
+      <!-- 最新上传 -->
+      <div class="sidebar-section">
+        <h3>最新上传</h3>
+        <div id="latest-uploads-list">
+          <div class="empty-state">暂无内容</div>
+        </div>
+      </div>
+
+      <!-- 动态流 -->
+      <div class="sidebar-section">
+        <h3>动态流</h3>
+        <div id="activity-feed-list">
+          <div class="empty-state">暂无动态</div>
+        </div>
+      </div>
+
+      <!-- 音乐播放器 -->
+      <div class="sidebar-section music-player">
+        <h3>音乐播放器</h3>
+        <div class="current-song" id="current-song-name">暂无音乐</div>
+        <div class="music-controls">
+          <button class="nav-btn" onclick="App.prevMusic()" title="上一首">&lt;&lt;</button>
+          <button class="play-btn" id="play-btn" onclick="App.togglePlay()">&gt;</button>
+          <button class="nav-btn" onclick="App.nextMusic()" title="下一首">&gt;&gt;</button>
+        </div>
+        <div class="progress-bar" id="progress-bar">
+          <div class="fill" id="progress-fill"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== 管理面板 ===== -->
+    <div id="admin-panel" class="admin-panel">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-orange-500">管理面板</h2>
+        <button id="admin-panel-close" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+      </div>
+
+      <!-- 创建分类 -->
+      <div id="admin-category-section" class="hidden mb-6">
+        <div class="section-title">创建分类</div>
+        <form id="create-category-form">
+          <input type="text" id="create-category-input" placeholder="输入分类名称">
+          <button type="submit" class="btn-primary w-full">创建分类</button>
+        </form>
+      </div>
+
+      <!-- 上传文件 -->
+      <div id="admin-upload-section" class="hidden mb-6">
+        <div class="section-title">上传文件</div>
+        <form id="upload-file-form">
+          <select id="upload-category-select">
+            <option value="">请选择分类</option>
+          </select>
+          <input type="file" id="upload-file-input" accept=".md,.txt,.ppt,.pptx,.doc,.docx" class="w-full mb-3 text-sm">
+          <button type="submit" class="btn-primary w-full">上传并提交审核</button>
+        </form>
+        <p class="text-gray-400 text-xs mt-1">支持 MD / TXT / PPT / DOC 格式，最大 10MB</p>
+      </div>
+
+      <!-- 上传音乐 -->
+      <div id="admin-upload-music-section" class="hidden mb-6">
+        <div class="section-title">上传音乐</div>
+        <form id="upload-music-form">
+          <input type="file" id="upload-music-input" accept=".mp3,.wav,.ogg,.m4a,.flac" class="w-full mb-3 text-sm">
+          <button type="submit" class="btn-primary w-full">上传音乐</button>
+        </form>
+        <p class="text-gray-400 text-xs mt-1">支持 MP3 / WAV / OGG 格式，最大 15MB</p>
+      </div>
+
+      <!-- 我的上传 -->
+      <div id="admin-my-uploads-section" class="hidden mb-6">
+        <div class="section-title">我的上传记录</div>
+        <div id="my-uploads-list">
+          <div class="empty-state">暂无记录</div>
+        </div>
+      </div>
+
+      <!-- 审批列表（仅 super） -->
+      <div id="admin-approval-section" class="hidden mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <div class="section-title section-title-inline">待审批文件</div>
+          <button id="refresh-approval" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+        </div>
+        <div id="pending-files-list">
+          <div class="empty-state">暂无待审批文件</div>
+        </div>
+      </div>
+
+      <!-- 分类管理（仅 super） -->
+      <div id="admin-manage-categories-section" class="hidden mb-6">
+        <div class="section-title">分类管理</div>
+        <div id="admin-categories-list">
+          <div class="empty-state">暂无分类</div>
+        </div>
+      </div>
+
+      <!-- 管理员管理（仅 super） -->
+      <div id="admin-user-section" class="hidden mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <div class="section-title section-title-inline">管理员管理</div>
+          <button id="refresh-users" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+        </div>
+        <div id="admin-users-list">
+          <div class="empty-state">暂无数据</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 登录模态框 ===== -->
+    <div id="login-modal" class="modal-overlay hidden">
+      <div class="modal-container max-w-sm">
+        <div class="modal-header">
+          <h2>管理员登录</h2>
+          <button id="login-close" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form id="login-form">
+            <div class="mb-4">
+              <label class="block text-sm text-gray-600 mb-1">用户名</label>
+              <input type="text" id="login-username" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-orange-500 outline-none">
+            </div>
+            <div class="mb-4">
+              <label class="block text-sm text-gray-600 mb-1">密码</label>
+              <input type="password" id="login-password" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-orange-500 outline-none">
+            </div>
+            <button type="submit" class="w-full py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition-colors">登录</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 预览模态框 ===== -->
+    <div id="preview-overlay" class="modal-overlay hidden">
+      <div class="modal-container">
+        <div class="modal-header">
+          <h2 id="preview-title">文件预览</h2>
+          <button id="preview-close" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="preview-body">
+          <p class="text-gray-400 text-center py-8">加载中...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 关于我们模态框 ===== -->
+    <div id="about-modal" class="modal-overlay hidden">
+      <div class="modal-container max-w-lg">
+        <div class="modal-header">
+          <h2>关于我们</h2>
+          <button class="modal-close" onclick="App.closeModal('about-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="about-content">
+            <div class="about-brand">
+              <div class="about-logo">D</div>
+              <h3>Duck's Blog - Public Studio</h3>
+            </div>
+            <p class="about-desc">
+              一个面向公众的开放知识分享平台，致力于提供高质量的技术文档、项目经验与创意思考。
+              我们相信知识应该自由流动，每一位访客都可以无障碍地浏览和学习。
+            </p>
+            <div class="about-stats">
+              <div class="stat-item">
+                <div class="stat-value" id="about-file-count">--</div>
+                <div class="stat-label">已发布文件</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-value" id="about-cat-count">--</div>
+                <div class="stat-label">内容分类</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-value">5</div>
+                <div class="stat-label">管理团队</div>
+              </div>
+            </div>
+            <div class="about-footer">
+              <p>Public Studio 始于 2026，用心做好每一份内容。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 联系我们模态框 ===== -->
+    <div id="contact-modal" class="modal-overlay hidden">
+      <div class="modal-container max-w-sm">
+        <div class="modal-header">
+          <h2>联系我们</h2>
+          <button class="modal-close" onclick="App.closeModal('contact-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="contact-info">
+            <div class="contact-item">
+              <div class="contact-icon-wrap">
+                <svg class="contact-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                </svg>
+              </div>
+              <div>
+                <div class="contact-label">电子邮箱</div>
+                <div class="contact-value">ducksblog@qd.je</div>
+              </div>
+            </div>
+            <div class="contact-item">
+              <div class="contact-icon-wrap">
+                <svg class="contact-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+                </svg>
+              </div>
+              <div>
+                <div class="contact-label">域名</div>
+                <div class="contact-value">duckpublic.qd.je</div>
+              </div>
+            </div>
+            <div class="contact-item">
+              <div class="contact-icon-wrap">
+                <svg class="contact-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                </svg>
+              </div>
+              <div>
+                <div class="contact-label">所在地</div>
+                <div class="contact-value">在线运营，全球可达</div>
+              </div>
+            </div>
+          </div>
+          <div class="contact-note">
+            <p>如有合作意向或问题反馈，请发送邮件至以上邮箱，我们会在 48 小时内回复。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 成为贡献者模态框 ===== -->
+    <div id="contributor-modal" class="modal-overlay hidden">
+      <div class="modal-container max-w-md">
+        <div class="modal-header">
+          <h2>成为贡献者</h2>
+          <button class="modal-close" onclick="App.closeModal('contributor-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <!-- 类型切换 -->
+          <div class="contrib-tabs">
+            <button class="contrib-tab active" data-type="normal" onclick="App.switchContribTab('normal')">普通贡献者</button>
+            <button class="contrib-tab" data-type="signed" onclick="App.switchContribTab('signed')">签约贡献者</button>
+          </div>
+
+          <!-- 普通贡献者表单 -->
+          <form id="contrib-form-normal" class="contrib-form" onsubmit="App.submitContributor(event, 'normal')">
+            <p class="contrib-desc">成为普通贡献者，您可以提交内容建议和反馈，参与社区讨论。</p>
+            <div class="form-group">
+              <label>昵称</label>
+              <input type="text" id="contrib-normal-name" required placeholder="您的昵称">
+            </div>
+            <div class="form-group">
+              <label>电子邮箱</label>
+              <input type="email" id="contrib-normal-email" required placeholder="your@email.com">
+            </div>
+            <div class="form-group">
+              <label>擅长领域</label>
+              <input type="text" id="contrib-normal-field" placeholder="例如：前端开发、技术写作、UI 设计">
+            </div>
+            <div class="form-group">
+              <label>申请理由</label>
+              <textarea id="contrib-normal-reason" rows="3" placeholder="简述您想贡献的方向..."></textarea>
+            </div>
+            <button type="submit" class="contrib-submit-btn">提交申请</button>
+          </form>
+
+          <!-- 签约贡献者表单（默认隐藏） -->
+          <form id="contrib-form-signed" class="contrib-form hidden" onsubmit="App.submitContributor(event, 'signed')">
+            <p class="contrib-desc">签约贡献者可获得直接发布权限，参与内容审核，成为平台核心成员。</p>
+            <div class="form-group">
+              <label>真实姓名</label>
+              <input type="text" id="contrib-signed-realname" required placeholder="请填写真实姓名">
+            </div>
+            <div class="form-group">
+              <label>电子邮箱</label>
+              <input type="email" id="contrib-signed-email" required placeholder="your@email.com">
+            </div>
+            <div class="form-group">
+              <label>手机号</label>
+              <input type="tel" id="contrib-signed-phone" required placeholder="您的手机号码">
+            </div>
+            <div class="form-group">
+              <label>专业领域</label>
+              <input type="text" id="contrib-signed-field" required placeholder="例如：全栈开发、AI 研究、系统架构">
+            </div>
+            <div class="form-group">
+              <label>个人简介 / 作品链接</label>
+              <textarea id="contrib-signed-bio" rows="3" placeholder="请提供个人简介、GitHub 或过往作品链接..."></textarea>
+            </div>
+            <div class="form-group">
+              <label>期望贡献频次</label>
+              <select id="contrib-signed-frequency">
+                <option value="weekly">每周至少一篇</option>
+                <option value="biweekly">每两周一篇</option>
+                <option value="monthly">每月至少一篇</option>
+                <option value="casual">不定期贡献</option>
+              </select>
+            </div>
+            <button type="submit" class="contrib-submit-btn">提交签约申请</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== 脚本 ===== -->
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/preview.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

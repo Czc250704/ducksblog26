@@ -1,0 +1,362 @@
+# Duck's Blog · Public Studio  
+## 项目规则 v1.0
+
+**项目名称**：ducksblog26H2  
+**域名**：duckpublic.qd.je
+
+---
+
+## 一、代码规范
+
+### 1.1 通用规则
+| 规则 | 说明 |
+|------|------|
+| 缩进 | 2 个空格，不使用 Tab |
+| 引号 | 统一使用单引号 `'` |
+| 分号 | 语句结尾必须加分号 `;` |
+| 命名 | 变量/函数用 camelCase，类用 PascalCase，常量用 UPPER_SNAKE_CASE |
+| 注释 | 关键逻辑必须有注释，注释用中文，简洁直接，无 AI 味 |
+
+### 1.2 注释示例（正确）
+```javascript
+// 检查用户是否登录，从 localStorage 读取 token
+function isLoggedIn() {
+  return !!localStorage.getItem('token');
+}
+```
+
+### 1.3 注释示例（错误，禁止）
+```javascript
+// 您好！这个函数用于验证用户的身份凭证是否有效哦~
+function validateCredentials() {
+  // 首先，我们需要获取到用户输入的账号信息...
+}
+```
+
+---
+
+## 二、前端规则
+
+### 2.1 样式规则
+- 框架：Tailwind CSS（CDN 引入）
+- 主题色：橘色（orange-500 为主色，orange-600 为 hover，orange-700 为 active）
+- 圆角：统一使用 `rounded-lg` 或 `rounded-xl`，不混用
+- 响应式：移动端优先，桌面端适配
+
+### 2.2 禁止事项
+```
+❌ 不使用任何 emoji 表情符号
+❌ 不使用 Tailwind 的 prose 类（AI 味道太重）
+❌ 不使用 @apply 自定义类（保持 CDN 方式）
+❌ 不内联 style 属性（除非动态计算）
+```
+
+### 2.3 布局固定规则
+```css
+/* 左侧主内容区 */
+.main-content {
+  width: 75%;
+  float: left;
+}
+
+/* 右侧边栏 */
+.right-sidebar {
+  width: 25%;
+  float: right;
+}
+```
+
+### 2.4 禁用调试代码（必须实现）
+```javascript
+// 禁用右键
+document.addEventListener('contextmenu', (e) => {
+  if (!window._SUPER_ADMIN_MODE_) e.preventDefault();
+});
+
+// 禁用 F12
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F12' && !window._SUPER_ADMIN_MODE_) {
+    e.preventDefault();
+    return false;
+  }
+  // Ctrl+Shift+I
+  if (e.ctrlKey && e.shiftKey && e.key === 'I' && !window._SUPER_ADMIN_MODE_) {
+    e.preventDefault();
+    return false;
+  }
+  // Ctrl+U
+  if (e.ctrlKey && e.key === 'u' && !window._SUPER_ADMIN_MODE_) {
+    e.preventDefault();
+    return false;
+  }
+});
+```
+
+### 2.5 最高管理员解除限制规则
+```javascript
+// 最高管理员登录后设置
+window._SUPER_ADMIN_MODE_ = true;
+
+// 登出时重置
+window._SUPER_ADMIN_MODE_ = false;
+```
+
+---
+
+## 三、后端规则
+
+### 3.1 目录结构（固定）
+```
+ducksblog26H2/
+├── server.js              # 入口文件
+├── package.json
+├── data/
+│   └── ducksblog.db       # SQLite 数据库
+├── storage/
+│   ├── pending/           # 待审核文件
+│   ├── approved/          # 已通过文件
+│   │   └── music/         # 音乐文件
+│   └── manifest.json      # 文件索引
+├── public/
+│   ├── index.html
+│   ├── css/
+│   ├── js/
+│   └── assets/
+└── .env                   # 环境变量（不提交）
+```
+
+### 3.2 API 响应格式（统一）
+```javascript
+// 成功
+{ success: true, data: ... }
+
+// 失败
+{ success: false, error: '错误信息' }
+
+// 未登录
+{ success: false, error: 'unauthorized', code: 401 }
+```
+
+### 3.3 状态码规则
+| 状态码 | 使用场景 |
+|--------|----------|
+| 200 | 成功 |
+| 201 | 创建成功 |
+| 400 | 请求参数错误 |
+| 401 | 未登录或 token 失效 |
+| 403 | 权限不足 |
+| 404 | 资源不存在 |
+| 500 | 服务器内部错误 |
+
+### 3.4 Git 同步规则
+```javascript
+// 审批通过后必须执行以下步骤
+async function syncToGit(filePath, filename) {
+  // 1. 确保 Git 配置正确
+  execSync('git config user.name "ducksblog"');
+  execSync('git config user.email "ducksblog@local"');
+  
+  // 2. 添加文件
+  execSync(`git add storage/approved/${filename}`);
+  
+  // 3. 更新 manifest.json
+  updateManifest(filename);
+  execSync('git add storage/manifest.json');
+  
+  // 4. 提交
+  execSync(`git commit -m "approve: ${filename}"`);
+  
+  // 5. 推送
+  execSync('git push origin main');
+}
+```
+
+---
+
+## 四、管理员账号规则（固定，不可变）
+
+| 账号 | 密码 | 角色 | 权限 |
+|------|------|------|------|
+| duck | 250901 | super | 全部权限 |
+| admin1 | 123123 | admin | 创建分类、上传文件 |
+| admin2 | 123123 | admin | 创建分类、上传文件 |
+| admin3 | 123123 | admin | 创建分类、上传文件 |
+| admin4 | 123123 | admin | 创建分类、上传文件 |
+
+### 4.1 密码存储规则
+- 使用 `bcrypt` 哈希存储
+- 哈希强度：10 轮
+
+### 4.2 Token 规则
+- 算法：JWT
+- 有效期：24 小时
+- Secret：环境变量 `JWT_SECRET`
+
+---
+
+## 五、文件处理规则
+
+### 5.1 支持的文件类型
+| 类型 | 扩展名 | 预览方式 |
+|------|--------|----------|
+| Markdown | .md | marked.js 渲染 |
+| 文本 | .txt | 纯文本显示 |
+| PowerPoint | .ppt, .pptx | Office 在线预览 |
+| Word | .doc, .docx | Office 在线预览 |
+
+### 5.2 文件大小限制
+- 单文件最大：10MB
+- 音乐文件最大：15MB
+
+### 5.3 文件命名规则
+```
+格式：YYYY-MM-DD_原始文件名
+示例：2026-01-15_技术分享.md
+
+// 后端自动处理
+const newName = `${new Date().toISOString().slice(0,10)}_${originalName}`;
+```
+
+### 5.4 manifest.json 结构
+```json
+{
+  "files": [
+    {
+      "id": 1,
+      "name": "2026-01-15_技术分享.md",
+      "category": "技术",
+      "creator": "admin1",
+      "uploadDate": "2026-01-15",
+      "size": 1024,
+      "type": "md"
+    }
+  ],
+  "lastUpdated": "2026-01-15T10:30:00Z"
+}
+```
+
+---
+
+## 六、数据库规则
+
+### 6.1 表结构（固定）
+
+**users**
+```sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('super', 'admin'))
+);
+```
+
+**categories**
+```sql
+CREATE TABLE categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  creator TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+```
+
+**files**
+```sql
+CREATE TABLE files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  creator TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+  uploaded_at TEXT NOT NULL,
+  approved_at TEXT,
+  FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+```
+
+**activities**
+```sql
+CREATE TABLE activities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('upload', 'approve', 'comment')),
+  content TEXT NOT NULL,
+  author TEXT NOT NULL,
+  related_id INTEGER,
+  created_at TEXT NOT NULL
+);
+```
+
+**comments**
+```sql
+CREATE TABLE comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  activity_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  author TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+);
+```
+
+---
+
+## 七、部署规则
+
+### 7.1 环境变量（必需）
+```env
+PORT=3000
+JWT_SECRET=ducksblog_secret_key_2026
+GITHUB_TOKEN=github_pat_xxxxx
+REPO_URL=https://github.com/username/ducksblog26H2-storage.git
+NODE_ENV=production
+```
+
+### 7.2 启动命令
+```bash
+npm install
+npm start
+```
+
+### 7.3 健康检查端点
+```
+GET /health
+返回：{ status: 'ok', timestamp: '...' }
+```
+
+---
+
+## 八、禁止事项清单
+
+| 禁止项 | 原因 |
+|--------|------|
+| ❌ 使用 emoji | 界面要求无表情符号 |
+| ❌ AI 风格文案 | “首先/然后/哦/啦/呀” |
+| ❌ 分类密码认证 | 除非最高管理员启用 |
+| ❌ 博客入口登录 | 访客直接进入 |
+| ❌ 用户注册功能 | 只有固定管理员 |
+| ❌ 付费/信用卡功能 | 必须完全免费 |
+| ❌ 删除原有功能 | 只能扩展不能删减 |
+
+---
+
+## 九、验收规则
+
+### 9.1 必须通过检查项
+- [ ] 访客无需登录可见所有内容
+- [ ] 5 个管理员账号均可登录
+- [ ] 二级管理员可创建分类、上传文件
+- [ ] 最高管理员有审批界面
+- [ ] 审批通过后文件自动 Git 推送
+- [ ] 右侧边栏有最新上传、动态、评论、音乐播放器
+- [ ] 可预览 MD/PPT/Word
+- [ ] F12/右键默认禁用，超级管理员登录后解除
+- [ ] 无任何 emoji 和 AI 文案
+
+### 9.2 代码质量检查
+- [ ] 注释完整且无 AI 味
+- [ ] 模块化组织
+- [ ] 无硬编码敏感信息
+
+---

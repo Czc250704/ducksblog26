@@ -1,0 +1,32 @@
+{
+  "files": [
+    {
+      "id": 3,
+      "name": "2026-06-13_æ°å»º Microsoft Word ææ¡£.docx",
+      "category": "测试",
+      "creator": "duck",
+      "uploadDate": "2026-06-13",
+      "size": 15152,
+      "type": "docx"
+    },
+    {
+      "id": 2,
+      "name": "2026-06-13_xiangmuguize.md",
+      "category": "测试",
+      "creator": "duck",
+      "uploadDate": "2026-06-13",
+      "size": 8732,
+      "type": "md"
+    },
+    {
+      "id": 4,
+      "name": "2026-06-13_�� Microsoft Word �c.docx",
+      "category": "测试",
+      "creator": "admin1",
+      "uploadDate": "2026-06-13",
+      "size": 15152,
+      "type": "docx"
+    }
+  ],
+  "lastUpdated": "2026-06-13T14:54:51.619Z"
+}
