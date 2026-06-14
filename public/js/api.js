@@ -193,8 +193,15 @@ const FileAPI = {
     // 根据类型返回不同的预览信息
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
       let publicUrl;
-      if (isGitHubUrl) {
-        publicUrl = file.storage_path; // 直接用 GitHub URL
+      
+      // 判断是否为 GitHub URL
+      const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
+      
+      if (gitHubMatch) {
+        // GitHub blob URL 转为 raw URL（Office Online 需要可访问的文件直链）
+        publicUrl = 'https://raw.githubusercontent.com/' + gitHubMatch[1] + '/' + gitHubMatch[2] + '/' + gitHubMatch[3];
+      } else if (isGitHubUrl) {
+        publicUrl = file.storage_path;
       } else {
         const { data: urlData } = sb.storage
           .from('blog-files')
@@ -212,31 +219,57 @@ const FileAPI = {
       };
     }
 
-    // MD/TXT：获取文件内容
+    // MD/TXT：获取文件内容（多源降级）
     if (['md', 'txt'].includes(file.file_type)) {
-      let text;
-      if (isGitHubUrl) {
-        // 从 GitHub 直链获取
-        const res = await fetch(file.storage_path);
-        text = await res.text();
-      } else {
-        // 方案1：通过 Supabase client 下载（带 auth header）
-        const { data: content, error } = await sb.storage
-          .from('blog-files')
-          .download(file.storage_path);
+      let text = null;
+      let lastError = '';
 
-        if (!error && content) {
-          text = await content.text();
-        } else {
-          // 方案2：降级到公共 URL 直接获取（无需 auth）
+      // 判断是否为 GitHub URL
+      const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
+      
+      // 方案0：GitHub raw URL（最高优先，GitHub Pages 环境最可靠）
+      if (gitHubMatch && !text) {
+        try {
+          const rawUrl = 'https://raw.githubusercontent.com/' + gitHubMatch[1] + '/' + gitHubMatch[2] + '/' + gitHubMatch[3];
+          const res = await fetch(rawUrl);
+          if (res.ok) {
+            text = await res.text();
+          } else {
+            lastError = 'GitHub Raw: HTTP ' + res.status;
+          }
+        } catch (e) { lastError = 'GitHub异常: ' + e.message; }
+      }
+
+      // 方案1：通过 Supabase client 下载
+      if (!text && !gitHubMatch) {
+        try {
+          const { data: content, error } = await sb.storage
+            .from('blog-files')
+            .download(file.storage_path);
+          if (!error && content) {
+            text = await content.text();
+          } else {
+            lastError = 'Supabase客户端: ' + (error?.message || '未知错误');
+          }
+        } catch (e) { lastError = 'Supabase异常: ' + e.message; }
+      }
+
+      // 方案2：公共 URL 直接获取
+      if (!text && !gitHubMatch) {
+        try {
           const { data: urlData } = sb.storage
             .from('blog-files')
             .getPublicUrl(file.storage_path);
-          const res = await fetch(urlData.publicUrl);
-          if (!res.ok) throw new Error('文件读取失败：' + res.status);
-          text = await res.text();
-        }
+          const res = await fetch(urlData.publicUrl, { mode: 'cors' });
+          if (res.ok) {
+            text = await res.text();
+          } else {
+            lastError = '公共URL: HTTP ' + res.status;
+          }
+        } catch (e) { lastError = 'Fetch异常: ' + e.message; }
       }
+
+      if (!text) throw new Error('文件读取失败 (' + lastError + ')');
 
       return {
         success: true,
