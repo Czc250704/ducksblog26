@@ -1,14 +1,13 @@
-// ===== 文件预览模块（Supabase Storage 版本） =====
+// ===== 文件预览模块（Edge Function 代理版） =====
 const Preview = {
   modal: null,
   overlay: null,
   _currentFileId: null,
+  _currentBlobUrl: null,
 
   init() {
     this.overlay = document.getElementById('preview-overlay');
     this.modal = document.getElementById('preview-modal');
-
-    // 点击遮罩关闭
     if (this.overlay) {
       this.overlay.addEventListener('click', (e) => {
         if (e.target === this.overlay) this.close();
@@ -17,82 +16,73 @@ const Preview = {
   },
 
   async open(fileId) {
+    // 清理上一个 blob URL
+    if (this._currentBlobUrl) URL.revokeObjectURL(this._currentBlobUrl);
+    this._currentBlobUrl = null;
     this._currentFileId = fileId;
+
+    const titleEl = document.getElementById('preview-title');
+    const bodyEl = document.getElementById('preview-body');
+
+    titleEl.textContent = '加载中...';
+    bodyEl.innerHTML = '<p class="text-gray-400 text-center py-8">正在加载文件内容...</p>';
+    this.overlay.classList.remove('hidden');
+
     try {
-      const titleEl = document.getElementById('preview-title');
-      const bodyEl = document.getElementById('preview-body');
-
-      titleEl.textContent = '加载中...';
-      bodyEl.innerHTML = '<p class="text-gray-400 text-center py-8">正在加载文件内容...</p>';
-      this.overlay.classList.remove('hidden');
-
       const result = await FileAPI.preview(fileId);
       const file = result.data;
 
       titleEl.textContent = file.original_name || file.filename;
 
+      // 保存 blob URL 引用，关闭时释放
+      if (file._blobUrl) this._currentBlobUrl = file._blobUrl;
+
       if (file.type === 'md') {
-        // 使用 marked.js 渲染 Markdown
+        // Markdown 渲染
         bodyEl.innerHTML = '<div class="markdown-body">' + marked.parse(file.content || '') + '</div>';
       } else if (file.type === 'txt') {
+        // 纯文本显示
         bodyEl.innerHTML = '<pre class="whitespace-pre-wrap font-mono text-sm text-gray-700">' + this.escapeHtml(file.content || '') + '</pre>';
       } else if (['ppt', 'pptx', 'doc', 'docx'].includes(file.type)) {
-        const publicUrl = file.previewUrl;
-        const encodedUrl = encodeURIComponent(publicUrl);
-
-        // Office 文件预览：多源降级策略
-        // 1. Microsoft Office Online（国际）
-        // 2. Google Docs Viewer（备选）
-        // 3. 最终兜底：直接下载
+        // Office 文件：提供下载（Office Online 不支持 blob URL，直接下载最可靠）
+        const dlUrl = file.previewUrl || '';
+        const fileName = this.escapeHtml(file.original_name || file.filename);
         bodyEl.innerHTML =
-          '<div class="office-preview-container">' +
-          '<iframe id="office-iframe" ' +
-          'src="https://view.officeapps.live.com/op/embed.aspx?src=' + encodedUrl + '" ' +
-          'width="100%" ' +
-          'height="600" ' +
-          'frameborder="0" ' +
-          'class="rounded-lg"' +
-          '></iframe>' +
+          '<div class="flex flex-col items-center py-10 gap-4">' +
+          '<div class="w-20 h-20 bg-orange-100 rounded-xl flex items-center justify-center">' +
+          '<span class="text-3xl font-bold text-orange-500">' + (file.type === 'doc' || file.type === 'docx' ? 'W' : 'P') + '</span>' +
           '</div>' +
-          '<div class="mt-3 flex flex-wrap gap-2 justify-center">' +
-          '<a href="' + publicUrl + '" target="_blank" rel="noopener noreferrer" ' +
-          'class="inline-block px-4 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium">' +
-          '下载文件</a>' +
-          '<button onclick="this.previousElementSibling.click();const frm=document.getElementById(\'office-iframe\');if(frm)frm.src=\'https://docs.google.com/viewer?url=' + encodedUrl + '&embedded=true\';" ' +
-          'class="inline-block px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm">' +
-          '切换 Google 预览</button>' +
+          '<p class="text-gray-600 text-sm">此文件类型请在本地打开查看</p>' +
+          '<a href="' + dlUrl + '" download="' + fileName + '" ' +
+          'class="inline-flex items-center gap-2 px-6 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium">' +
+          '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>' +
+          '下载 ' + fileName + '</a>' +
           '</div>';
-
-        // 检测 Office 预览加载失败，自动切换提示
-        const iframe = document.getElementById('office-iframe');
-        if (iframe) {
-          iframe.addEventListener('load', function() {
-            try {
-              // 如果 iframe 内容被阻止，会抛出跨域错误
-              // 这里仅做标记，实际由用户手动切换
-            } catch(e) {}
-          });
-        }
       } else if (file.type === 'music') {
         // 音乐播放器
+        const srcUrl = file.previewUrl || '';
         bodyEl.innerHTML =
           '<div class="flex flex-col items-center py-6 gap-4">' +
-          '<audio controls preload="metadata" class="w-full max-w-md"><source src="' + (file.previewUrl || file.content_url || '') + '" type="audio/mpeg">浏览器不支持音频播放</audio>' +
-          '<a href="' + (file.previewUrl || file.content_url || '') + '" download="' + this.escapeHtml(file.original_name || file.filename) + '" ' +
+          '<audio controls autoplay preload="metadata" class="w-full max-w-md rounded-lg">' +
+          '<source src="' + srcUrl + '" type="audio/mpeg">浏览器不支持音频播放</audio>' +
+          '<a href="' + srcUrl + '" download="' + this.escapeHtml(file.original_name || file.filename) + '" ' +
           'class="inline-block px-4 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium">下载音乐</a>' +
           '</div>';
       } else {
         bodyEl.innerHTML = '<p class="text-gray-500 text-center py-8">不支持预览此文件类型</p>';
       }
     } catch (e) {
-      const bodyEl = document.getElementById('preview-body');
       bodyEl.innerHTML = '<p class="text-red-500 text-center py-8">加载失败：' + this.escapeHtml(e.message) + '</p>';
     }
   },
 
   close() {
+    // 释放 Blob URL 内存
+    if (this._currentBlobUrl) {
+      URL.revokeObjectURL(this._currentBlobUrl);
+      this._currentBlobUrl = null;
+    }
     if (this.overlay) this.overlay.classList.add('hidden');
-    // 通知 Dock 移除该文件
     if (this._currentFileId && typeof App !== 'undefined' && App.removeDockFileItem) {
       App.removeDockFileItem(this._currentFileId);
     }

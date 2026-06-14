@@ -37,6 +37,11 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // CORS 预检
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   // 只接受 POST
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ success: false, error: '仅支持 POST' }), {
@@ -447,6 +452,93 @@ Deno.serve(async (req: Request) => {
         if (error) return jsonResponse({ success: false, error: error.message });
 
         return jsonResponse({ success: true, data: record });
+      }
+
+      // ===== 文件代理下载（解决浏览器 CORS / 跨域问题） =====
+      // 服务端从 Supabase Storage 或 GitHub 读取文件，返回原始内容给前端
+      case 'proxy-file': {
+        const fileId = data?.fileId || (body as any)?.fileId;
+        if (!fileId) return jsonResponse({ success: false, error: '缺少文件ID' }, 400);
+
+        // 查询文件记录
+        const { data: fileRecord, error: dbError } = await supabase
+          .from('files')
+          .select('*')
+          .eq('id', parseInt(fileId))
+          .eq('status', 'approved')
+          .single();
+
+        if (dbError || !fileRecord) return jsonResponse({ success: false, error: '文件不存在' }, 404);
+
+        let fileContent: Uint8Array | null = null;
+        const sp = fileRecord.storage_path || '';
+
+        // 尝试1：Supabase Storage 下载
+        if (!sp.startsWith('https://')) {
+          try {
+            const { data, error } = await supabase.storage
+              .from(fileRecord.file_type === 'music' ? 'blog-music' : 'blog-files')
+              .download(sp);
+            if (!error && data) fileContent = new Uint8Array(await data.arrayBuffer());
+          } catch(e) {}
+        }
+
+        // 尝试2：GitHub URL 下载（支持 blob/raw/jsdelivr 三种格式）
+        if (!fileContent && sp.startsWith('https://')) {
+          try {
+            let downloadUrl = sp;
+
+            // blob 页面 → raw 内容 URL
+            const blobMatch = sp.match(/github\.com\/[^/]+\/[^/]+\/blob\/([^/]+)\/(.+)/);
+            if (blobMatch) {
+              const repo = sp.match(/github\.com\/([^/]+\/[^/]+)/)?.[1];
+              downloadUrl = `https://raw.githubusercontent.com/${repo}/${blobMatch[1]}/${blobMatch[2]}`;
+            }
+            
+            // jsdelivr → raw
+            const jsdMatch = sp.match(/jsdelivr\.net\/gh\/([^@]+)@([^/]+)\/(.+)/);
+            if (jsdMatch) {
+              downloadUrl = `https://raw.githubusercontent.com/${jsdMatch[1]}/${jsdMatch[2]}/${jsdMatch[3]}`;
+            }
+
+            const resp = await fetch(downloadUrl);
+            if (resp.ok) fileContent = new Uint8Array(await resp.arrayBuffer());
+          } catch(e) {}
+        }
+
+        if (!fileContent) {
+          return jsonResponse({
+            success: false,
+            error: '文件不可用，可能尚未同步完成',
+            _debug_storage_path: sp, // 方便调试
+          }, 503);
+        }
+
+        // 根据文件类型设置 Content-Type
+        const ext = fileRecord.file_type || sp.split('.').pop() || '';
+        const contentTypes: Record<string, string> = {
+          md: 'text/markdown; charset=utf-8',
+          txt: 'text/plain; charset=utf-8',
+          doc: 'application/msword',
+          docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          ppt: 'application/vnd.ms-powerpoint',
+          pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          music: 'audio/mpeg',
+          mp3: 'audio/mpeg',
+          wav: 'audio/wav',
+        };
+        const contentType = contentTypes[ext] || 'application/octet-stream';
+
+        // 返回原始文件内容（非 JSON）
+        return new Response(fileContent, {
+          status: 200,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=300',
+          },
+        });
       }
 
       default:
