@@ -4,14 +4,24 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
-const Database = require('better-sqlite3');
+const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
-const { execSync } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'ducksblog_secret_key_2026';
+
+// Supabase 客户端（Node.js 20 需要手动提供 WebSocket 实现）
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY,
+  {
+    auth: { persistSession: false },
+    realtime: { transport: WebSocket }
+  }
+);
 
 // 中间件
 app.use(express.json());
@@ -21,15 +31,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/storage/approved', express.static(path.join(__dirname, 'storage', 'approved')));
 
 // 确保目录存在
-const DATA_DIR = path.join(__dirname, 'data');
 const STORAGE_DIR = path.join(__dirname, 'storage');
 const PENDING_DIR = path.join(STORAGE_DIR, 'pending');
 const APPROVED_DIR = path.join(STORAGE_DIR, 'approved');
 const MUSIC_DIR = path.join(APPROVED_DIR, 'music');
 const MANIFEST_PATH = path.join(STORAGE_DIR, 'manifest.json');
-const DB_PATH = path.join(DATA_DIR, 'ducksblog.db');
 
-[DATA_DIR, STORAGE_DIR, PENDING_DIR, APPROVED_DIR, MUSIC_DIR].forEach((dir) => {
+[STORAGE_DIR, PENDING_DIR, APPROVED_DIR, MUSIC_DIR].forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -40,87 +48,34 @@ if (!fs.existsSync(MANIFEST_PATH)) {
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ files: [], lastUpdated: new Date().toISOString() }, null, 2));
 }
 
-// 数据库初始化
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// 初始化管理员账号
+async function seedUsers() {
+  const seedData = [
+    { username: 'duck', password: '250901', role: 'super' },
+    { username: 'admin1', password: '123123', role: 'admin' },
+    { username: 'admin2', password: '123123', role: 'admin' },
+    { username: 'admin3', password: '123123', role: 'admin' },
+    { username: 'admin4', password: '123123', role: 'admin' }
+  ];
 
-// 创建表
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('super', 'admin'))
-  );
+  for (const u of seedData) {
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('username', u.username)
+      .maybeSingle();
 
-  CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    creator TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category_id INTEGER NOT NULL,
-    filename TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    creator TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
-    uploaded_at TEXT NOT NULL,
-    approved_at TEXT,
-    FOREIGN KEY (category_id) REFERENCES categories(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS activities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL CHECK(type IN ('upload', 'approve', 'comment')),
-    content TEXT NOT NULL,
-    author TEXT NOT NULL,
-    related_id INTEGER,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    activity_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    author TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS contributors (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL CHECK(type IN ('normal', 'signed')),
-    name TEXT,
-    real_name TEXT,
-    email TEXT NOT NULL,
-    phone TEXT,
-    field TEXT,
-    reason TEXT,
-    bio TEXT,
-    frequency TEXT,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
-    created_at TEXT NOT NULL
-  );
-`);
-
-// 初始化管理员账号（如果不存在）
-const seedUsers = [
-  { username: 'duck', password: '250901', role: 'super' },
-  { username: 'admin1', password: '123123', role: 'admin' },
-  { username: 'admin2', password: '123123', role: 'admin' },
-  { username: 'admin3', password: '123123', role: 'admin' },
-  { username: 'admin4', password: '123123', role: 'admin' }
-];
-
-const insertUser = db.prepare('INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)');
-seedUsers.forEach((u) => {
-  const hashed = bcrypt.hashSync(u.password, 10);
-  insertUser.run(u.username, hashed, u.role);
-});
+    if (!existing) {
+      const hashed = bcrypt.hashSync(u.password, 10);
+      await supabase.from('users').insert({
+        username: u.username,
+        password: hashed,
+        role: u.role
+      });
+    }
+  }
+  console.log('管理员账号初始化完成');
+}
 
 // JWT 鉴权中间件
 function authMiddleware(req, res, next) {
@@ -154,6 +109,17 @@ function adminAuthMiddleware(req, res, next) {
   next();
 }
 
+// 修复 Windows 下中文文件名乱码
+function fixFileNameEncoding(name) {
+  try {
+    const decoded = Buffer.from(name, 'latin1').toString('utf8');
+    if (decoded !== name && /[^\x00-\x7f]/.test(decoded)) {
+      return decoded;
+    }
+  } catch (e) { /* 忽略解码失败 */ }
+  return name;
+}
+
 // Multer 配置
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -166,24 +132,10 @@ const storage = multer.diskStorage({
   }
 });
 
-// 修复 Windows 下中文文件名乱码
-// busboy 将 multipart 中 UTF-8 编码的中文按 Latin-1 解码，需要反转回来
-function fixFileNameEncoding(name) {
-  try {
-    const decoded = Buffer.from(name, 'latin1').toString('utf8');
-    // 还原后不同且包含非 ASCII 字符，说明确实是编码问题
-    if (decoded !== name && /[^\x00-\x7f]/.test(decoded)) {
-      return decoded;
-    }
-  } catch (e) { /* 忽略解码失败 */ }
-  return name;
-}
-
 const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // 修复文件名编码
     file.originalname = fixFileNameEncoding(file.originalname);
     const allowed = ['.md', '.txt', '.ppt', '.pptx', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -210,7 +162,6 @@ const musicUpload = multer({
   storage: musicStorage,
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // 修复文件名编码
     file.originalname = fixFileNameEncoding(file.originalname);
     const allowed = ['.mp3', '.wav', '.ogg', '.m4a', '.flac'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -239,34 +190,71 @@ function updateManifest(filename, fileInfo) {
 }
 
 // Git 同步
-function syncToGit(filePath, filename) {
-  try {
-    const repoUrl = process.env.REPO_URL;
-    const token = process.env.GITHUB_TOKEN;
-    if (!repoUrl || !token) {
-      console.log('Git 同步跳过：未配置 REPO_URL 或 GITHUB_TOKEN');
-      return;
-    }
-    const cwd = STORAGE_DIR;
-
-    // 检查是否为 git 仓库
-    if (!fs.existsSync(path.join(STORAGE_DIR, '.git'))) {
-      execSync('git init', { cwd, stdio: 'pipe' });
-      const authUrl = repoUrl.replace('https://', 'https://' + token + '@');
-      execSync('git remote add origin ' + authUrl, { cwd, stdio: 'pipe' });
-    }
-
-    execSync('git config user.name "ducksblog"', { cwd, stdio: 'pipe' });
-    execSync('git config user.email "ducksblog@local"', { cwd, stdio: 'pipe' });
-
-    execSync('git add .', { cwd, stdio: 'pipe' });
-    execSync('git commit -m "approve: ' + filename + '"', { cwd, stdio: 'pipe' });
-    execSync('git push origin main', { cwd, stdio: 'pipe' });
-
-    console.log('Git 同步成功: ' + filename);
-  } catch (e) {
-    console.error('Git 同步失败: ' + e.message);
+async function syncToGit(filePath, filename) {
+  const repoUrl = process.env.REPO_URL;
+  const token = process.env.GITHUB_TOKEN;
+  if (!repoUrl || !token) {
+    console.log('Git 同步跳过：未配置 REPO_URL 或 GITHUB_TOKEN');
+    return null;
   }
+
+  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(\.git)?$/);
+  if (!match) {
+    console.log('Git 同步跳过：无法解析 REPO_URL');
+    return null;
+  }
+  const owner = match[1];
+  const repo = match[2];
+  const remotePath = 'storage/approved/' + filename;
+  const rawUrl = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/main/' + remotePath;
+
+  const fileContent = fs.readFileSync(filePath);
+  const base64Content = fileContent.toString('base64');
+
+  console.log('正在推送文件到 GitHub: ' + filename + ' ...');
+
+  return new Promise((resolve) => {
+    const apiPath = '/repos/' + owner + '/' + repo + '/contents/' + remotePath;
+    const postData = JSON.stringify({
+      message: 'approve: ' + filename,
+      content: base64Content
+    });
+
+    const options = {
+      hostname: 'api.github.com',
+      path: apiPath,
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'User-Agent': 'ducksblog',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const https = require('https');
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 201 || res.statusCode === 200) {
+          console.log('GitHub 推送成功: ' + filename);
+          resolve(rawUrl);
+        } else {
+          console.error('GitHub API 错误: HTTP ' + res.statusCode + ' - ' + data.substring(0, 200));
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      console.error('GitHub 推送失败: ' + e.message);
+      resolve(null);
+    });
+
+    req.write(postData);
+    req.end();
+  });
 }
 
 // ========== API 路由 ==========
@@ -277,19 +265,27 @@ app.get('/health', (req, res) => {
 });
 
 // 登录
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ success: false, error: '用户名和密码不能为空' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) {
+
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('username', username)
+    .maybeSingle();
+
+  if (error || !user) {
     return res.status(401).json({ success: false, error: '用户名或密码错误' });
   }
+
   const valid = bcrypt.compareSync(password, user.password);
   if (!valid) {
     return res.status(401).json({ success: false, error: '用户名或密码错误' });
   }
+
   const token = jwt.sign(
     { id: user.id, username: user.username, role: user.role },
     JWT_SECRET,
@@ -299,71 +295,112 @@ app.post('/api/login', (req, res) => {
 });
 
 // 获取当前用户信息
-app.get('/api/me', authMiddleware, (req, res) => {
-  const user = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(req.user.id);
-  if (!user) {
+app.get('/api/me', authMiddleware, async (req, res) => {
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('id, username, role')
+    .eq('id', req.user.id)
+    .maybeSingle();
+
+  if (error || !user) {
     return res.status(404).json({ success: false, error: '用户不存在' });
   }
   res.json({ success: true, data: user });
 });
 
 // 获取分类列表
-app.get('/api/categories', (req, res) => {
-  const categories = db.prepare('SELECT * FROM categories ORDER BY created_at DESC').all();
+app.get('/api/categories', async (req, res) => {
+  const { data: categories, error } = await supabase
+    .from('categories')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
   res.json({ success: true, data: categories });
 });
 
 // 创建分类
-app.post('/api/categories', authMiddleware, adminAuthMiddleware, (req, res) => {
+app.post('/api/categories', authMiddleware, adminAuthMiddleware, async (req, res) => {
   const { name } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, error: '分类名称不能为空' });
   }
-  const existing = db.prepare('SELECT id FROM categories WHERE name = ?').get(name.trim());
+
+  const { data: existing } = await supabase
+    .from('categories')
+    .select('id')
+    .eq('name', name.trim())
+    .maybeSingle();
+
   if (existing) {
     return res.status(400).json({ success: false, error: '分类已存在' });
   }
-  const result = db.prepare('INSERT INTO categories (name, creator, created_at) VALUES (?, ?, ?)').run(
-    name.trim(),
-    req.user.username,
-    new Date().toISOString()
-  );
+
+  const { data: created, error } = await supabase
+    .from('categories')
+    .insert({
+      name: name.trim(),
+      creator: req.user.username,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
   // 记录动态
-  db.prepare('INSERT INTO activities (type, content, author, related_id, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    'upload',
-    '创建了分类「' + name.trim() + '」',
-    req.user.username,
-    null,
-    new Date().toISOString()
-  );
-  res.status(201).json({ success: true, data: { id: result.lastInsertRowid, name: name.trim() } });
+  await supabase.from('activities').insert({
+    type: 'upload',
+    content: '创建了分类「' + name.trim() + '」',
+    author: req.user.username,
+    created_at: new Date().toISOString()
+  });
+
+  res.status(201).json({ success: true, data: { id: created.id, name: name.trim() } });
 });
 
 // 删除分类（仅 super）
-app.delete('/api/categories/:id', authMiddleware, superAuthMiddleware, (req, res) => {
+app.delete('/api/categories/:id', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { id } = req.params;
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+
+  const { data: category } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
   if (!category) {
     return res.status(404).json({ success: false, error: '分类不存在' });
   }
-  // 删除分类下的文件
-  const files = db.prepare('SELECT * FROM files WHERE category_id = ?').all(id);
-  files.forEach((file) => {
-    const filePath = file.status === 'approved'
-      ? path.join(APPROVED_DIR, file.filename)
-      : path.join(PENDING_DIR, file.filename);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  });
-  db.prepare('DELETE FROM files WHERE category_id = ?').run(id);
-  db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+
+  // 删除磁盘上的文件
+  const { data: files } = await supabase
+    .from('files')
+    .select('*')
+    .eq('category_id', id);
+
+  if (files) {
+    files.forEach((file) => {
+      const filePath = file.status === 'approved'
+        ? path.join(APPROVED_DIR, file.filename)
+        : path.join(PENDING_DIR, file.filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    });
+  }
+
+  await supabase.from('files').delete().eq('category_id', id);
+  await supabase.from('categories').delete().eq('id', id);
+
   res.json({ success: true, data: { message: '分类已删除' } });
 });
 
-// 获取文件列表（访客仅看已审核，管理员看全部）
-app.get('/api/files', (req, res) => {
+// 获取文件列表
+app.get('/api/files', async (req, res) => {
   const { categoryId } = req.query;
-
-  // 检查是否登录用户
   let authUser = null;
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -372,27 +409,37 @@ app.get('/api/files', (req, res) => {
     } catch (e) { /* ignore */ }
   }
 
-  let query = 'SELECT files.*, categories.name AS category_name FROM files JOIN categories ON files.category_id = categories.id';
-  const params = [];
+  let query = supabase
+    .from('files')
+    .select('*, categories!inner(name)')
+    .order('uploaded_at', { ascending: false });
 
+  // 非管理员只看已审核文件
   if (!authUser || (authUser.role !== 'super' && authUser.role !== 'admin')) {
-    // 访客只能看已审核
-    query += ' WHERE files.status = \'approved\'';
+    query = query.eq('status', 'approved');
   }
 
   if (categoryId) {
-    query += (query.includes('WHERE') ? ' AND' : ' WHERE') + ' files.category_id = ?';
-    params.push(categoryId);
+    query = query.eq('category_id', parseInt(categoryId));
   }
 
-  query += ' ORDER BY files.uploaded_at DESC';
+  const { data: files, error } = await query;
 
-  const files = db.prepare(query).all(...params);
-  res.json({ success: true, data: files });
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  // 展平 categories 嵌套
+  const result = (files || []).map((f) => ({
+    ...f,
+    category_name: f.categories ? f.categories.name : ''
+  }));
+
+  res.json({ success: true, data: result });
 });
 
 // 上传文件
-app.post('/api/upload', authMiddleware, adminAuthMiddleware, upload.single('file'), (req, res) => {
+app.post('/api/upload', authMiddleware, adminAuthMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: '请选择文件' });
   }
@@ -401,32 +448,42 @@ app.post('/api/upload', authMiddleware, adminAuthMiddleware, upload.single('file
     return res.status(400).json({ success: false, error: '请选择分类' });
   }
 
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
+  const { data: category } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('id', parseInt(categoryId))
+    .maybeSingle();
+
   if (!category) {
     return res.status(404).json({ success: false, error: '分类不存在' });
   }
 
-  const result = db.prepare(
-    'INSERT INTO files (category_id, filename, original_name, creator, status, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(
-    categoryId,
-    req.file.filename,
-    req.file.originalname,
-    req.user.username,
-    'pending',
-    new Date().toISOString()
-  );
+  const { data: created, error } = await supabase
+    .from('files')
+    .insert({
+      category_id: parseInt(categoryId),
+      filename: req.file.filename,
+      original_name: req.file.originalname,
+      creator: req.user.username,
+      status: 'pending',
+      uploaded_at: new Date().toISOString()
+    })
+    .select()
+    .single();
 
-  // 记录动态
-  db.prepare('INSERT INTO activities (type, content, author, related_id, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    'upload',
-    '上传了文件「' + req.file.originalname + '」到分类「' + category.name + '」，等待审核',
-    req.user.username,
-    result.lastInsertRowid,
-    new Date().toISOString()
-  );
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
 
-  res.status(201).json({ success: true, data: { id: result.lastInsertRowid, filename: req.file.filename } });
+  await supabase.from('activities').insert({
+    type: 'upload',
+    content: '上传了文件「' + req.file.originalname + '」到分类「' + category.name + '」，等待审核',
+    author: req.user.username,
+    related_id: created.id,
+    created_at: new Date().toISOString()
+  });
+
+  res.status(201).json({ success: true, data: { id: created.id, filename: req.file.filename } });
 });
 
 // 上传音乐
@@ -438,17 +495,36 @@ app.post('/api/upload-music', authMiddleware, adminAuthMiddleware, musicUpload.s
 });
 
 // 获取待审批列表（仅 super）
-app.get('/api/admin/pending', authMiddleware, superAuthMiddleware, (req, res) => {
-  const files = db.prepare(
-    'SELECT files.*, categories.name AS category_name FROM files JOIN categories ON files.category_id = categories.id WHERE files.status = \'pending\' ORDER BY files.uploaded_at DESC'
-  ).all();
-  res.json({ success: true, data: files });
+app.get('/api/admin/pending', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { data: files, error } = await supabase
+    .from('files')
+    .select('*, categories!inner(name)')
+    .eq('status', 'pending')
+    .order('uploaded_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  const result = (files || []).map((f) => ({
+    ...f,
+    category_name: f.categories ? f.categories.name : ''
+  }));
+
+  res.json({ success: true, data: result });
 });
 
 // 审批通过（仅 super）
-app.post('/api/admin/approve/:id', authMiddleware, superAuthMiddleware, (req, res) => {
+app.post('/api/admin/approve/:id', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { id } = req.params;
-  const file = db.prepare('SELECT files.*, categories.name AS category_name FROM files JOIN categories ON files.category_id = categories.id WHERE files.id = ? AND files.status = \'pending\'').get(id);
+
+  const { data: file } = await supabase
+    .from('files')
+    .select('*, categories!inner(name)')
+    .eq('id', parseInt(id))
+    .eq('status', 'pending')
+    .maybeSingle();
+
   if (!file) {
     return res.status(404).json({ success: false, error: '文件不存在或已处理' });
   }
@@ -460,42 +536,48 @@ app.post('/api/admin/approve/:id', authMiddleware, superAuthMiddleware, (req, re
     return res.status(404).json({ success: false, error: '文件在磁盘上不存在' });
   }
 
-  // 移动文件到 approved 目录
   fs.renameSync(pendingPath, approvedPath);
 
-  // 更新数据库
   const now = new Date().toISOString();
-  db.prepare('UPDATE files SET status = \'approved\', approved_at = ? WHERE id = ?').run(now, id);
 
-  // 更新 manifest
+  await supabase
+    .from('files')
+    .update({ status: 'approved', approved_at: now })
+    .eq('id', parseInt(id));
+
   const stats = fs.statSync(approvedPath);
   updateManifest(file.filename, {
     id: file.id,
-    categoryName: file.category_name,
+    categoryName: file.categories ? file.categories.name : '',
     creator: file.creator,
     uploaded_at: file.uploaded_at,
     size: stats.size
   });
 
-  // 记录动态
-  db.prepare('INSERT INTO activities (type, content, author, related_id, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    'approve',
-    '文件「' + file.original_name + '」已通过审核',
-    req.user.username,
-    file.id,
-    now
-  );
+  await supabase.from('activities').insert({
+    type: 'approve',
+    content: '文件「' + file.original_name + '」已通过审核',
+    author: req.user.username,
+    related_id: file.id,
+    created_at: now
+  });
 
-  // Git 同步
   syncToGit(approvedPath, file.filename);
 
   res.json({ success: true, data: { id: file.id, filename: file.filename } });
 });
 
 // 拒绝审批（仅 super）
-app.delete('/api/admin/reject/:id', authMiddleware, superAuthMiddleware, (req, res) => {
+app.delete('/api/admin/reject/:id', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { id } = req.params;
-  const file = db.prepare('SELECT * FROM files WHERE id = ? AND status = \'pending\'').get(id);
+
+  const { data: file } = await supabase
+    .from('files')
+    .select('*')
+    .eq('id', parseInt(id))
+    .eq('status', 'pending')
+    .maybeSingle();
+
   if (!file) {
     return res.status(404).json({ success: false, error: '文件不存在或已处理' });
   }
@@ -505,75 +587,137 @@ app.delete('/api/admin/reject/:id', authMiddleware, superAuthMiddleware, (req, r
     fs.unlinkSync(pendingPath);
   }
 
-  db.prepare('UPDATE files SET status = \'rejected\' WHERE id = ?').run(id);
+  await supabase
+    .from('files')
+    .update({ status: 'rejected' })
+    .eq('id', parseInt(id));
 
   res.json({ success: true, data: { message: '文件已拒绝' } });
 });
 
 // 获取当前登录用户的上传记录
-app.get('/api/my-uploads', authMiddleware, adminAuthMiddleware, (req, res) => {
-  const files = db.prepare(
-    'SELECT files.*, categories.name AS category_name FROM files JOIN categories ON files.category_id = categories.id WHERE files.creator = ? ORDER BY files.uploaded_at DESC'
-  ).all(req.user.username);
-  res.json({ success: true, data: files });
+app.get('/api/my-uploads', authMiddleware, adminAuthMiddleware, async (req, res) => {
+  const { data: files, error } = await supabase
+    .from('files')
+    .select('*, categories!inner(name)')
+    .eq('creator', req.user.username)
+    .order('uploaded_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  const result = (files || []).map((f) => ({
+    ...f,
+    category_name: f.categories ? f.categories.name : ''
+  }));
+
+  res.json({ success: true, data: result });
 });
 
 // 获取动态列表
-app.get('/api/activities', (req, res) => {
-  const activities = db.prepare(
-    'SELECT * FROM activities ORDER BY created_at DESC LIMIT 50'
-  ).all();
+app.get('/api/activities', async (req, res) => {
+  const { data: activities, error } = await supabase
+    .from('activities')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
 
-  // 为每条动态获取评论数
-  const countStmt = db.prepare('SELECT COUNT(*) AS count FROM comments WHERE activity_id = ?');
-  const activitiesWithComments = activities.map((a) => {
-    const { count } = countStmt.get(a.id);
-    return { ...a, commentCount: count };
-  });
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  // 为每条动态附带评论数
+  const activitiesWithComments = await Promise.all(
+    (activities || []).map(async (a) => {
+      const { count } = await supabase
+        .from('comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('activity_id', a.id);
+      return { ...a, commentCount: count || 0 };
+    })
+  );
 
   res.json({ success: true, data: activitiesWithComments });
 });
 
 // 发布新动态（任何人可发布，无需登录）
-app.post('/api/activities', (req, res) => {
+app.post('/api/activities', async (req, res) => {
   const { content, author } = req.body;
   if (!content || !content.trim()) {
     return res.status(400).json({ success: false, error: '内容不能为空' });
   }
   const finalAuthor = (author && author.trim()) ? author.trim() : '匿名访客';
-  const result = db.prepare(
-    'INSERT INTO activities (type, content, author, created_at) VALUES (?, ?, ?, ?)'
-  ).run('comment', content.trim(), finalAuthor, new Date().toISOString());
 
-  res.status(201).json({ success: true, data: { id: result.lastInsertRowid } });
+  const { data: created, error } = await supabase
+    .from('activities')
+    .insert({
+      type: 'comment',
+      content: content.trim(),
+      author: finalAuthor,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  res.status(201).json({ success: true, data: { id: created.id } });
 });
 
 // 发表评论
-app.post('/api/comments', (req, res) => {
+app.post('/api/comments', async (req, res) => {
   const { activityId, content, author } = req.body;
   if (!activityId || !content || !content.trim()) {
     return res.status(400).json({ success: false, error: '参数不完整' });
   }
-  const activity = db.prepare('SELECT id FROM activities WHERE id = ?').get(activityId);
+
+  const { data: activity } = await supabase
+    .from('activities')
+    .select('id')
+    .eq('id', parseInt(activityId))
+    .maybeSingle();
+
   if (!activity) {
     return res.status(404).json({ success: false, error: '动态不存在' });
   }
 
   const commentAuthor = (author && author.trim()) ? author.trim() : '匿名访客';
 
-  const result = db.prepare(
-    'INSERT INTO comments (activity_id, content, author, created_at) VALUES (?, ?, ?, ?)'
-  ).run(activityId, content.trim(), commentAuthor, new Date().toISOString());
+  const { data: created, error } = await supabase
+    .from('comments')
+    .insert({
+      activity_id: parseInt(activityId),
+      content: content.trim(),
+      author: commentAuthor,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
 
-  res.status(201).json({ success: true, data: { id: result.lastInsertRowid } });
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  res.status(201).json({ success: true, data: { id: created.id } });
 });
 
 // 获取某条动态的评论
-app.get('/api/comments/:activityId', (req, res) => {
+app.get('/api/comments/:activityId', async (req, res) => {
   const { activityId } = req.params;
-  const comments = db.prepare(
-    'SELECT * FROM comments WHERE activity_id = ? ORDER BY created_at ASC'
-  ).all(activityId);
+
+  const { data: comments, error } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('activity_id', parseInt(activityId))
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
   res.json({ success: true, data: comments });
 });
 
@@ -593,11 +737,16 @@ app.get('/api/music', (req, res) => {
 });
 
 // 文件预览
-app.get('/api/preview/:fileId', (req, res) => {
+app.get('/api/preview/:fileId', async (req, res) => {
   const { fileId } = req.params;
-  const file = db.prepare(
-    'SELECT files.*, categories.name AS category_name FROM files JOIN categories ON files.category_id = categories.id WHERE files.id = ? AND files.status = \'approved\''
-  ).get(fileId);
+
+  const { data: file } = await supabase
+    .from('files')
+    .select('*, categories!inner(name)')
+    .eq('id', parseInt(fileId))
+    .eq('status', 'approved')
+    .maybeSingle();
+
   if (!file) {
     return res.status(404).json({ success: false, error: '文件不存在' });
   }
@@ -610,8 +759,6 @@ app.get('/api/preview/:fileId', (req, res) => {
   const ext = path.extname(file.filename).toLowerCase();
   const isTextFile = ['.md', '.txt'].includes(ext);
   const isOfficeFile = ['.ppt', '.pptx', '.doc', '.docx'].includes(ext);
-
-  // 只有文本文件才读取内容，二进制文件直接给预览链接
   const content = isTextFile ? fs.readFileSync(filePath, 'utf-8') : null;
 
   res.json({
@@ -621,39 +768,49 @@ app.get('/api/preview/:fileId', (req, res) => {
       filename: file.original_name,
       type: ext.replace('.', ''),
       content: content,
-      previewUrl: isOfficeFile
-        ? '/storage/approved/' + encodeURIComponent(file.filename)
-        : null,
-      // 直接文件访问链接（供 Office Online 使用，避免前端二次编码）
-      rawPath: isOfficeFile
-        ? '/storage/approved/' + file.filename
-        : null
+      previewUrl: isOfficeFile ? '/storage/approved/' + encodeURIComponent(file.filename) : null,
+      rawPath: isOfficeFile ? '/storage/approved/' + file.filename : null
     }
   });
 });
 
 // 获取管理员列表（仅 super）
-app.get('/api/admin/users', authMiddleware, superAuthMiddleware, (req, res) => {
-  const users = db.prepare('SELECT id, username, role FROM users ORDER BY id').all();
+app.get('/api/admin/users', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, username, role')
+    .order('id');
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
   res.json({ success: true, data: users });
 });
 
 // 删除管理员（仅 super）
-app.delete('/api/admin/users/:id', authMiddleware, superAuthMiddleware, (req, res) => {
+app.delete('/api/admin/users/:id', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { id } = req.params;
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', parseInt(id))
+    .maybeSingle();
+
   if (!user) {
     return res.status(404).json({ success: false, error: '用户不存在' });
   }
   if (user.username === 'duck') {
     return res.status(400).json({ success: false, error: '不能删除最高管理员' });
   }
-  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+
+  await supabase.from('users').delete().eq('id', parseInt(id));
   res.json({ success: true, data: { message: '管理员已删除' } });
 });
 
 // 提交贡献者申请（无需登录）
-app.post('/api/contributors', (req, res) => {
+app.post('/api/contributors', async (req, res) => {
   const { type, name, realName, email, phone, field, reason, bio, frequency } = req.body;
 
   if (!type || !['normal', 'signed'].includes(type)) {
@@ -672,48 +829,77 @@ app.post('/api/contributors', (req, res) => {
     }
   }
 
-  const result = db.prepare(
-    'INSERT INTO contributors (type, name, real_name, email, phone, field, reason, bio, frequency, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(
-    type,
-    (name || '').trim(),
-    (realName || '').trim(),
-    email.trim(),
-    (phone || '').trim(),
-    (field || '').trim(),
-    (reason || '').trim(),
-    (bio || '').trim(),
-    (frequency || 'casual'),
-    new Date().toISOString()
-  );
+  const { data: created, error } = await supabase
+    .from('contributors')
+    .insert({
+      type,
+      name: (name || '').trim(),
+      real_name: (realName || '').trim(),
+      email: email.trim(),
+      phone: (phone || '').trim(),
+      field: (field || '').trim(),
+      reason: (reason || '').trim(),
+      bio: (bio || '').trim(),
+      frequency: frequency || 'casual',
+      status: 'pending',
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
 
-  res.status(201).json({ success: true, data: { id: result.lastInsertRowid } });
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  res.status(201).json({ success: true, data: { id: created.id } });
 });
 
 // 获取贡献者申请列表（仅 super）
-app.get('/api/contributors', authMiddleware, superAuthMiddleware, (req, res) => {
+app.get('/api/contributors', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { type, status } = req.query;
-  let query = 'SELECT * FROM contributors WHERE 1=1';
-  const params = [];
-  if (type) { query += ' AND type = ?'; params.push(type); }
-  if (status) { query += ' AND status = ?'; params.push(status); }
-  query += ' ORDER BY created_at DESC';
-  const list = db.prepare(query).all(...params);
+
+  let query = supabase.from('contributors').select('*');
+
+  if (type) {
+    query = query.eq('type', type);
+  }
+  if (status) {
+    query = query.eq('status', status);
+  }
+
+  const { data: list, error } = await query.order('created_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
   res.json({ success: true, data: list });
 });
 
 // 审批贡献者（仅 super）
-app.post('/api/contributors/:id/approve', authMiddleware, superAuthMiddleware, (req, res) => {
+app.post('/api/contributors/:id/approve', authMiddleware, superAuthMiddleware, async (req, res) => {
   const { id } = req.params;
-  const app = db.prepare('SELECT * FROM contributors WHERE id = ?').get(id);
-  if (!app) return res.status(404).json({ success: false, error: '申请不存在' });
-  db.prepare('UPDATE contributors SET status = \'approved\' WHERE id = ?').run(id);
+
+  const { data: application } = await supabase
+    .from('contributors')
+    .select('*')
+    .eq('id', parseInt(id))
+    .maybeSingle();
+
+  if (!application) {
+    return res.status(404).json({ success: false, error: '申请不存在' });
+  }
+
+  await supabase
+    .from('contributors')
+    .update({ status: 'approved' })
+    .eq('id', parseInt(id));
+
   res.json({ success: true, data: { message: '已通过' } });
 });
 
 // 全局错误处理
 app.use((err, req, res, next) => {
-  // Multer 文件大小 / 字段数量限制等内置错误
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ success: false, error: '文件大小超出限制（最大10MB）' });
@@ -723,20 +909,23 @@ app.use((err, req, res, next) => {
     }
     return res.status(400).json({ success: false, error: err.message });
   }
-
-  // Multer fileFilter 抛出的自定义错误（不是 MulterError 实例）
   if (err.message === '不支持的文件类型') {
     return res.status(400).json({ success: false, error: '不支持的文件类型，仅允许：.md / .txt / .ppt / .pptx / .doc / .docx' });
   }
   if (err.message === '不支持的音频格式') {
     return res.status(400).json({ success: false, error: '不支持的音频格式，仅允许：.mp3 / .wav / .ogg / .m4a / .flac' });
   }
-
   console.error('服务器错误:', err.message);
   res.status(500).json({ success: false, error: '服务器内部错误：' + err.message });
 });
 
 // 启动服务
-app.listen(PORT, () => {
-  console.log('Duck\'s Blog 服务已启动: http://localhost:' + PORT);
+seedUsers().then(() => {
+  console.log('Supabase 数据库已连接');
+  app.listen(PORT, () => {
+    console.log("Duck's Blog 服务已启动: http://localhost:" + PORT);
+  });
+}).catch((err) => {
+  console.error('初始化失败:', err);
+  process.exit(1);
 });

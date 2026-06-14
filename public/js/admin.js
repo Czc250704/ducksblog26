@@ -1,4 +1,4 @@
-// ===== 管理面板模块 =====
+// ===== 管理面板模块（Supabase Storage + Edge Function 版本） =====
 const Admin = {
   panelOpen: false,
 
@@ -162,6 +162,12 @@ const Admin = {
       return;
     }
 
+    // 文件大小检查（10MB）
+    if (file.size > 10 * 1024 * 1024) {
+      alert('文件大小超出限制（最大10MB）');
+      return;
+    }
+
     try {
       await FileAPI.upload(file, categoryId);
       fileInput.value = '';
@@ -181,6 +187,13 @@ const Admin = {
       alert('请选择音乐文件');
       return;
     }
+
+    // 文件大小检查（15MB）
+    if (file.size > 15 * 1024 * 1024) {
+      alert('文件大小超出限制（最大15MB）');
+      return;
+    }
+
     try {
       await FileAPI.uploadMusic(file);
       fileInput.value = '';
@@ -204,7 +217,7 @@ const Admin = {
         '<div class="pending-item" id="pending-' + f.id + '">' +
         '<div class="info">' +
         '<div class="name">' + f.original_name + '</div>' +
-        '<div class="meta">' + f.category_name + ' / ' + f.creator + ' / ' + f.uploaded_at.slice(0, 10) + '</div>' +
+        '<div class="meta">' + (f.category_name || f.categories?.name || '') + ' / ' + f.creator + ' / ' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + '</div>' +
         '</div>' +
         '<div class="actions">' +
         '<button class="btn-approve" onclick="Admin.approveFile(' + f.id + ')">通过</button>' +
@@ -218,7 +231,7 @@ const Admin = {
   },
 
   async approveFile(id) {
-    if (!confirm('确定通过此文件？将通过后自动同步到 Git。')) return;
+    if (!confirm('确定通过此文件？')) return;
     try {
       await FileAPI.approve(id);
       this.loadPendingFiles();
@@ -232,7 +245,7 @@ const Admin = {
   },
 
   async rejectFile(id) {
-    if (!confirm('确定拒绝此文件？')) return;
+    if (!confirm('确定拒绝此文件？文件将被删除。')) return;
     try {
       await FileAPI.reject(id);
       this.loadPendingFiles();
@@ -262,7 +275,7 @@ const Admin = {
         '<div class="pending-item">' +
         '<div class="info">' +
         '<div class="name">' + f.original_name + '</div>' +
-        '<div class="meta">' + f.category_name + ' / ' + f.uploaded_at.slice(0, 10) + ' / ' + (statusMap[f.status] || f.status) + '</div>' +
+        '<div class="meta">' + (f.category_name || f.categories?.name || '') + ' / ' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + ' / ' + (statusMap[f.status] || f.status) + '</div>' +
         '</div>' +
         '</div>'
       ).join('');

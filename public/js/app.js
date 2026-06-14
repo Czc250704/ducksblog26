@@ -1,4 +1,4 @@
-// ===== 主应用 =====
+// ===== 主应用（Supabase 版本） =====
 const App = {
   currentCategory: null,
   audio: null,
@@ -74,7 +74,6 @@ const App = {
     const overlay = document.getElementById(modalId);
     if (!overlay) return;
     overlay.classList.remove('hidden');
-    // 清除可能残留的状态
     const container = overlay.querySelector('.modal-container');
     if (container) {
       container.classList.remove('minimized', 'maximized');
@@ -92,7 +91,6 @@ const App = {
   },
 
   // ===== 红绿灯按钮统一方法 =====
-  // action: 'close' / 'minimize' / 'maximize'
   trafficAction(modalId, action) {
     const overlay = document.getElementById(modalId);
     if (!overlay) return;
@@ -105,7 +103,6 @@ const App = {
     } else if (action === 'minimize') {
       if (container) {
         if (container.classList.contains('minimized')) {
-          // 点击已最小化的恢复
           container.classList.remove('minimized');
         } else {
           container.classList.remove('maximized');
@@ -135,7 +132,8 @@ const App = {
     if (!content) return;
 
     try {
-      await ActivityAPI.create(content, author);
+      const result = await ActivityAPI.create(content, author);
+      if (result.error) throw new Error(result.error.message || '发布失败');
       document.getElementById('post-modal').classList.add('hidden');
       this.loadActivities();
     } catch (err) {
@@ -175,7 +173,6 @@ const App = {
     try {
       const result = await ContributorAPI.submit(data);
       if (result.success) {
-        // 显示成功界面
         const modalBody = document.querySelector('#contributor-modal .modal-body');
         modalBody.innerHTML =
           '<div class="contrib-success">' +
@@ -200,13 +197,9 @@ const App = {
     const overlay = document.getElementById('entry-overlay');
     const mainInterface = document.getElementById('main-interface');
 
-    // Public Studio (0-2s) -> Duck's Blog (1.6s-3.6s) -> 主界面 (4s+)
-    // CSS 动画自动处理文字淡入淡出
     setTimeout(() => {
       overlay.classList.add('fade-out');
-      // 先设置 visible 类触发 visibility 和动画
       mainInterface.classList.add('visible');
-      // 动画结束 + overlay 淡出后加载数据
       setTimeout(() => {
         overlay.style.display = 'none';
         this.loadAll();
@@ -289,7 +282,7 @@ const App = {
           '<div class="file-icon"><span>' + ext + '</span></div>' +
           '<div class="file-info">' +
           '<div class="file-name">' + f.original_name + '</div>' +
-          '<div class="file-meta">' + (f.category_name || '') + ' / ' + f.creator + ' / ' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + '</div>' +
+          '<div class="file-meta">' + (f.category_name || '') + ' / ' + f.creator + ' / ' + (f.approved_at ? f.approved_at.slice(0, 10) : f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + '</div>' +
           '</div>' +
           '</div>'
         );
@@ -318,7 +311,7 @@ const App = {
       container.innerHTML = latest.map((f) =>
         '<div class="latest-item">' +
         '<div class="name">' + f.original_name + '</div>' +
-        '<div class="date">' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + ' / ' + f.category_name + '</div>' +
+        '<div class="date">' + (f.approved_at ? f.approved_at.slice(0, 10) : f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + ' / ' + f.category_name + '</div>' +
         '</div>'
       ).join('');
     } catch (e) {
@@ -359,7 +352,6 @@ const App = {
     const box = document.getElementById('comment-box-' + activityId);
     if (!box) return;
 
-    // 切换显示
     if (!box.classList.contains('hidden')) {
       box.classList.add('hidden');
       return;
@@ -390,7 +382,6 @@ const App = {
 
       box.innerHTML = html;
 
-      // 回车提交
       const input = document.getElementById('comment-input-' + activityId);
       if (input) {
         input.addEventListener('keydown', (e) => {
@@ -413,9 +404,7 @@ const App = {
     try {
       await CommentAPI.create(activityId, content, author || '匿名访客');
       input.value = '';
-      // 重新加载评论
       this.showCommentBox(activityId);
-      // 刷新动态列表更新评论数
       this.loadActivities();
     } catch (e) {
       alert('评论失败：' + e.message);
@@ -517,7 +506,6 @@ const App = {
   addDockFileItem(fileId, fileName) {
     const dockBar = document.getElementById('dock-bar');
     if (!dockBar) return;
-    // 检查是否已存在
     if (dockBar.querySelector('[data-file-id="' + fileId + '"]')) return;
 
     const item = document.createElement('div');
@@ -533,7 +521,6 @@ const App = {
       this.previewFile(fileId);
     });
 
-    // 插入到分隔线之后（静态固定图标之后）
     const dividers = dockBar.querySelectorAll('.dock-divider');
     if (dividers.length > 0) {
       dockBar.insertBefore(item, dividers[dividers.length - 1].nextSibling);
@@ -542,7 +529,6 @@ const App = {
     }
   },
 
-  // 从 Dock 移除已关闭文件
   removeDockFileItem(fileId) {
     const item = document.querySelector('.dock-item[data-file-id="' + fileId + '"]');
     if (item) item.remove();
@@ -568,7 +554,6 @@ const App = {
     try {
       await Auth.login(username, password);
       document.getElementById('login-modal').classList.add('hidden');
-      // 刷新数据
       this.loadFiles();
       this.loadActivities();
     } catch (e) {
@@ -578,42 +563,35 @@ const App = {
 
   // ===== 调试保护 =====
   setupDebugProtection() {
-    // 禁用右键菜单
     document.addEventListener('contextmenu', (e) => {
       if (!window._SUPER_ADMIN_MODE_) e.preventDefault();
     }, true);
 
-    // 禁用 F12 和开发者工具快捷键
     document.addEventListener('keydown', (e) => {
       if (window._SUPER_ADMIN_MODE_) return;
-      // F12
       if (e.key === 'F12' || e.keyCode === 123) {
         e.preventDefault();
         return false;
       }
-      // Ctrl+Shift+I / C
       if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'C' || e.key === 'c' || e.keyCode === 73 || e.keyCode === 67)) {
         e.preventDefault();
         return false;
       }
-      // Ctrl+Shift+J
       if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j' || e.keyCode === 74)) {
         e.preventDefault();
         return false;
       }
-      // Ctrl+U
       if (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.keyCode === 85)) {
         e.preventDefault();
         return false;
       }
-      // Ctrl+S
       if (e.ctrlKey && (e.key === 's' || e.key === 'S' || e.keyCode === 83)) {
         e.preventDefault();
         return false;
       }
     }, true);
 
-    // 检测开发者工具（简单版）
+    // 检测开发者工具
     setInterval(() => {
       if (!window._SUPER_ADMIN_MODE_) {
         const before = new Date();

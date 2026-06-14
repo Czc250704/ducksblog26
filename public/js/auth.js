@@ -1,4 +1,4 @@
-// ===== 认证状态管理 =====
+// ===== 认证状态管理（纯前端 Supabase 版本） =====
 const Auth = {
   token: null,
   user: null,

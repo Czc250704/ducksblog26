@@ -1,4 +1,4 @@
-// ===== 文件预览模块 =====
+// ===== 文件预览模块（Supabase Storage 版本） =====
 const Preview = {
   modal: null,
   overlay: null,
@@ -13,12 +13,6 @@ const Preview = {
       this.overlay.addEventListener('click', (e) => {
         if (e.target === this.overlay) this.close();
       });
-    }
-
-    // 关闭按钮
-    const closeBtn = document.getElementById('preview-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => this.close());
     }
   },
 
@@ -35,7 +29,7 @@ const Preview = {
       const result = await FileAPI.preview(fileId);
       const file = result.data;
 
-      titleEl.textContent = file.filename;
+      titleEl.textContent = file.original_name || file.filename;
 
       if (file.type === 'md') {
         // 使用 marked.js 渲染 Markdown
@@ -43,39 +37,23 @@ const Preview = {
       } else if (file.type === 'txt') {
         bodyEl.innerHTML = '<pre class="whitespace-pre-wrap font-mono text-sm text-gray-700">' + this.escapeHtml(file.content || '') + '</pre>';
       } else if (['ppt', 'pptx', 'doc', 'docx'].includes(file.type)) {
-        // Office 文件预览：优先尝试 Office Online，失败时显示下载链接
-        const rawPath = file.rawPath || file.previewUrl;
-        const fullUrl = window.location.origin + rawPath;
-        const encodedUrl = encodeURIComponent(fullUrl);
-        // 判断是否为本地环境（localhost / 127.0.0.1）
-        const isLocalhost = /^(http:\/\/)?(localhost|127\.0\.0\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i.test(window.location.origin);
+        const publicUrl = file.previewUrl;
+        const encodedUrl = encodeURIComponent(publicUrl);
 
-        if (isLocalhost) {
-          // 本地环境无法使用 Office Online，直接提供下载
-          bodyEl.innerHTML =
-            '<div class="text-center py-8">' +
-            '<p class="text-gray-500 mb-4">Office 在线预览仅支持公网访问的地址</p>' +
-            '<p class="text-gray-400 text-sm mb-4">本地开发环境下，请下载文件后打开查看</p>' +
-            '<a href="' + rawPath + '" download="' + this.escapeHtml(file.filename) + '" ' +
-            'class="inline-block px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">' +
-            '下载文件</a>' +
-            '</div>';
-        } else {
-          // 生产环境：Office Online iframe 预览
-          bodyEl.innerHTML =
-            '<iframe ' +
-            'src="https://view.officeapps.live.com/op/embed.aspx?src=' + encodedUrl + '" ' +
-            'width="100%" ' +
-            'height="600" ' +
-            'frameborder="0" ' +
-            'class="rounded-lg"' +
-            '></iframe>' +
-            '<div class="mt-3 text-center">' +
-            '<a href="' + rawPath + '" download="' + this.escapeHtml(file.filename) + '" ' +
-            'class="inline-block px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm">' +
-            '如预览失败请点击下载</a>' +
-            '</div>';
-        }
+        // Supabase Storage 是公网 URL，可以直接使用 Office Online 预览
+        bodyEl.innerHTML =
+          '<iframe ' +
+          'src="https://view.officeapps.live.com/op/embed.aspx?src=' + encodedUrl + '" ' +
+          'width="100%" ' +
+          'height="600" ' +
+          'frameborder="0" ' +
+          'class="rounded-lg"' +
+          '></iframe>' +
+          '<div class="mt-3 text-center">' +
+          '<a href="' + publicUrl + '" download="' + this.escapeHtml(file.original_name || file.filename) + '" ' +
+          'class="inline-block px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm">' +
+          '如预览失败请点击下载</a>' +
+          '</div>';
       } else {
         bodyEl.innerHTML = '<p class="text-gray-500 text-center py-8">不支持预览此文件类型</p>';
       }
