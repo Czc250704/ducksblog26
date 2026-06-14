@@ -5,8 +5,8 @@ const SUPABASE_URL = 'https://bwsgplhiiwldhrxztkld.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3c2dwbGhpaXdsZGhyeHp0a2xkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDcwNzksImV4cCI6MjA5Njk4MzA3OX0.Jtr5qLHaX7MK4GZPDMycJQwa6wztFPNTbMQ5y0qPq44';
 const EDGE_BASE = SUPABASE_URL + '/functions/v1';
 
-// 初始化 Supabase 客户端（通过 CDN 的 UMD 构建，挂载在 window.supabase）
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+// 初始化 Supabase 客户端（CDN 的 UMD 构建挂载在 window.supabase）
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false },
 });
 
@@ -50,7 +50,7 @@ async function edgeRequest(action, data = {}) {
 
 // Supabase 查询（公共读取，使用 anon key + RLS 过滤）
 async function supabaseQuery(table, queryFn) {
-  let query = supabase.from(table).select(queryFn.select || '*');
+  let query = sb.from(table).select(queryFn.select || '*');
 
   if (queryFn.eq) {
     Object.entries(queryFn.eq).forEach(([k, v]) => { query = query.eq(k, v); });
@@ -117,7 +117,7 @@ const FileAPI = {
     const storagePath = dateStr + '_' + Date.now() + '.' + ext;
 
     // Step 1: 上传到 Supabase Storage
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await sb.storage
       .from('blog-files')
       .upload(storagePath, file, {
         cacheControl: '3600',
@@ -143,7 +143,7 @@ const FileAPI = {
     const dateStr = new Date().toISOString().slice(0, 10);
     const storagePath = dateStr + '_music_' + Date.now() + '.' + ext;
 
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await sb.storage
       .from('blog-music')
       .upload(storagePath, file, {
         cacheControl: '3600',
@@ -178,7 +178,7 @@ const FileAPI = {
   // 获取文件预览内容
   async preview(fileId) {
     // 先从 files 表获取文件信息
-    const { data: file } = await supabase
+    const { data: file } = await sb
       .from('files')
       .select('*')
       .eq('id', fileId)
@@ -190,7 +190,7 @@ const FileAPI = {
     // 根据类型返回不同的预览信息
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
       // Office 文件：返回公开 Storage URL
-      const { data: urlData } = supabase.storage
+      const { data: urlData } = sb.storage
         .from('blog-files')
         .getPublicUrl(file.storage_path);
 
@@ -206,7 +206,7 @@ const FileAPI = {
 
     // MD/TXT：获取文件内容
     if (['md', 'txt'].includes(file.file_type)) {
-      const { data: content, error } = await supabase.storage
+      const { data: content, error } = await sb.storage
         .from('blog-files')
         .download(file.storage_path);
 
@@ -230,7 +230,7 @@ const FileAPI = {
 // ===== 动态 =====
 const ActivityAPI = {
   async getAll() {
-    const { data, error } = await supabase
+    const { data, error } = await sb
       .from('activities')
       .select('*')
       .order('created_at', { ascending: false });
@@ -240,7 +240,7 @@ const ActivityAPI = {
     // 获取每个动态的评论数
     const activitiesWithCounts = await Promise.all(
       data.map(async (a) => {
-        const { count, error: countErr } = await supabase
+        const { count, error: countErr } = await sb
           .from('comments')
           .select('*', { count: 'exact', head: true })
           .eq('activity_id', a.id);
@@ -256,7 +256,7 @@ const ActivityAPI = {
   },
 
   create(content, author) {
-    return supabase
+    return sb
       .from('activities')
       .insert({
         type: 'comment',
@@ -272,7 +272,7 @@ const ActivityAPI = {
 // ===== 评论 =====
 const CommentAPI = {
   async getByActivity(activityId) {
-    const { data, error } = await supabase
+    const { data, error } = await sb
       .from('comments')
       .select('*')
       .eq('activity_id', activityId)
@@ -283,7 +283,7 @@ const CommentAPI = {
   },
 
   async create(activityId, content, author) {
-    const { error } = await supabase
+    const { error } = await sb
       .from('comments')
       .insert({
         activity_id: activityId,
@@ -300,7 +300,7 @@ const CommentAPI = {
 // ===== 音乐 =====
 const MusicAPI = {
   async getList() {
-    const { data, error } = await supabase
+    const { data, error } = await sb
       .from('files')
       .select('*')
       .eq('file_type', 'music')
@@ -313,7 +313,7 @@ const MusicAPI = {
     return {
       success: true,
       data: (data || []).map((m) => {
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = sb.storage
           .from('blog-music')
           .getPublicUrl(m.storage_path);
 
