@@ -190,6 +190,11 @@ const FileAPI = {
     // 判断 storage_path 是 GitHub 直链还是 Supabase 路径
     const isGitHubUrl = file.storage_path && file.storage_path.startsWith('https://');
 
+    // GitHub blob URL → jsDelivr CDN URL（支持 CORS，国内速度快）
+    function toJsDelivr(gitHubMatch) {
+      return 'https://cdn.jsdelivr.net/gh/' + gitHubMatch[1] + '@' + gitHubMatch[2] + '/' + gitHubMatch[3];
+    }
+
     // 根据类型返回不同的预览信息
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
       let publicUrl;
@@ -198,8 +203,7 @@ const FileAPI = {
       const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
       
       if (gitHubMatch) {
-        // GitHub blob URL 转为 raw URL（Office Online 需要可访问的文件直链）
-        publicUrl = 'https://raw.githubusercontent.com/' + gitHubMatch[1] + '/' + gitHubMatch[2] + '/' + gitHubMatch[3];
+        publicUrl = toJsDelivr(gitHubMatch); // 用 jsDelivr（支持 CORS）
       } else if (isGitHubUrl) {
         publicUrl = file.storage_path;
       } else {
@@ -227,17 +231,17 @@ const FileAPI = {
       // 判断是否为 GitHub URL
       const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
       
-      // 方案0：GitHub raw URL（最高优先，GitHub Pages 环境最可靠）
+      // 方案0：jsDelivr CDN（GitHub 文件首选，支持 CORS）
       if (gitHubMatch && !text) {
         try {
-          const rawUrl = 'https://raw.githubusercontent.com/' + gitHubMatch[1] + '/' + gitHubMatch[2] + '/' + gitHubMatch[3];
-          const res = await fetch(rawUrl);
+          const cdnUrl = toJsDelivr(gitHubMatch);
+          const res = await fetch(cdnUrl);
           if (res.ok) {
             text = await res.text();
           } else {
-            lastError = 'GitHub Raw: HTTP ' + res.status;
+            lastError = 'jsDelivr CDN: HTTP ' + res.status;
           }
-        } catch (e) { lastError = 'GitHub异常: ' + e.message; }
+        } catch (e) { lastError = 'jsDelivr异常: ' + e.message; }
       }
 
       // 方案1：通过 Supabase client 下载
