@@ -54,7 +54,7 @@ const Auth = {
     const userInfo = document.getElementById('user-info');
     const usernameDisplay = document.getElementById('username-display');
     const adminToggle = document.getElementById('admin-toggle');
-    const adminPanel = document.getElementById('admin-panel');
+    const adminModal = document.getElementById('admin-modal');
 
     // 管理员通用功能
     const adminSections = [
@@ -99,7 +99,7 @@ const Auth = {
       userInfo.classList.add('hidden');
       usernameDisplay.textContent = '';
       if (adminToggle) adminToggle.classList.add('hidden');
-      if (adminPanel) adminPanel.classList.remove('open');
+      if (adminModal) adminModal.classList.add('hidden');
 
       // 隐藏所有管理功能
       [...adminSections, ...superSections].forEach((id) => {

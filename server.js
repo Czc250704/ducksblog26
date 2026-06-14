@@ -534,6 +534,20 @@ app.get('/api/activities', (req, res) => {
   res.json({ success: true, data: activitiesWithComments });
 });
 
+// 发布新动态（任何人可发布，无需登录）
+app.post('/api/activities', (req, res) => {
+  const { content, author } = req.body;
+  if (!content || !content.trim()) {
+    return res.status(400).json({ success: false, error: '内容不能为空' });
+  }
+  const finalAuthor = (author && author.trim()) ? author.trim() : '匿名访客';
+  const result = db.prepare(
+    'INSERT INTO activities (type, content, author, created_at) VALUES (?, ?, ?, ?)'
+  ).run('comment', content.trim(), finalAuthor, new Date().toISOString());
+
+  res.status(201).json({ success: true, data: { id: result.lastInsertRowid } });
+});
+
 // 发表评论
 app.post('/api/comments', (req, res) => {
   const { activityId, content, author } = req.body;

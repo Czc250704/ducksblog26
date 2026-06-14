@@ -4,16 +4,8 @@ const Admin = {
 
   init() {
     const toggleBtn = document.getElementById('admin-toggle');
-    const panel = document.getElementById('admin-panel');
-
     if (toggleBtn) {
       toggleBtn.addEventListener('click', () => this.togglePanel());
-    }
-
-    // 关闭面板
-    const closeBtn = document.getElementById('admin-panel-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => this.closePanel());
     }
 
     // 创建分类表单
@@ -57,22 +49,22 @@ const Admin = {
   },
 
   togglePanel() {
-    const panel = document.getElementById('admin-panel');
-    if (!panel) return;
+    const modal = document.getElementById('admin-modal');
+    if (!modal) return;
     this.panelOpen = !this.panelOpen;
     if (this.panelOpen) {
-      panel.classList.add('open');
+      modal.classList.remove('hidden');
       this.loadAll();
     } else {
-      panel.classList.remove('open');
+      modal.classList.add('hidden');
     }
   },
 
   closePanel() {
-    const panel = document.getElementById('admin-panel');
-    if (!panel) return;
+    const modal = document.getElementById('admin-modal');
+    if (!modal) return;
     this.panelOpen = false;
-    panel.classList.remove('open');
+    modal.classList.add('hidden');
   },
 
   loadAll() {

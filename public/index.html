@@ -7,6 +7,20 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="css/style.css">
+  <script>
+    // 最早阶段禁用 F12/右键（不等任何资源加载）
+    (function(){
+      window._SUPER_ADMIN_MODE_ = false;
+      document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);
+      document.addEventListener('keydown', function(e){
+        if (window._SUPER_ADMIN_MODE_) return;
+        if (e.key === 'F12' || e.keyCode === 123) { e.preventDefault(); return false; }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j' || e.key === 'C' || e.key === 'c' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) { e.preventDefault(); return false; }
+        if (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.keyCode === 85)) { e.preventDefault(); return false; }
+        if (e.ctrlKey && (e.key === 's' || e.key === 'S' || e.keyCode === 83)) { e.preventDefault(); return false; }
+      }, true);
+    })();
+  </script>
 </head>
 <body class="bg-gray-50 text-gray-800 antialiased">
 
@@ -16,55 +30,26 @@
     <div class="entry-text ducks-blog">Duck's Blog</div>
   </div>
 
-  <!-- ===== Dock 导航栏 ===== -->
-  <nav id="dock-bar">
-    <div class="dock-item" data-action="about" title="关于我们">
-      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-      </svg>
-      <span class="dock-label">关于</span>
-    </div>
-    <div class="dock-item" data-action="contact" title="联系我们">
-      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
-      </svg>
-      <span class="dock-label">联系</span>
-    </div>
-    <div class="dock-item" data-action="contribute" title="成为贡献者">
-      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-      </svg>
-      <span class="dock-label">贡献</span>
-    </div>
-    <div class="dock-divider"></div>
-    <div class="dock-item" data-action="files" title="文件列表">
-      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
-      </svg>
-      <span class="dock-label">文件</span>
-    </div>
-  </nav>
-
   <!-- ===== 主界面 ===== -->
   <div id="main-interface">
 
-    <!-- 头部 -->
+    <!-- 头部：Mac 风格红绿灯 + 标题 + 登录 -->
     <header class="site-header">
-      <h1>Duck's Blog · Public Studio</h1>
-      <div class="flex items-center gap-3">
-        <button id="login-btn" class="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition-colors">登录</button>
-        <div id="user-info" class="hidden flex items-center gap-3">
-          <span id="username-display" class="text-sm text-gray-600"></span>
-          <button id="admin-toggle" class="hidden px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition-colors">管理</button>
-          <button id="logout-btn" class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-300 transition-colors">登出</button>
+      <h1>Duck's Blog / Public Studio</h1>
+      <div class="header-right">
+        <button id="login-btn" class="login-btn">登录</button>
+        <div id="user-info" class="hidden user-info-bar">
+          <span id="username-display" class="user-name"></span>
+          <button id="admin-toggle" class="hidden admin-toggle-btn">管理</button>
+          <button id="logout-btn" class="logout-btn">登出</button>
         </div>
       </div>
     </header>
 
-    <!-- 左侧主内容 -->
+    <!-- 主内容区（全宽） -->
     <main class="main-content">
       <!-- 分类标签 -->
-      <div id="category-tabs" class="mb-4">
+      <div id="category-tabs" class="category-row">
         <span id="category-all-tab" class="category-tab active" onclick="App.currentCategory=null;App.loadFiles();document.querySelectorAll('.category-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">全部</span>
       </div>
 
@@ -74,46 +59,95 @@
       </div>
     </main>
 
-    <!-- 右侧边栏 -->
-    <aside class="right-sidebar">
-      <!-- 最新上传 -->
-      <div class="sidebar-section">
-        <h3>最新上传</h3>
+    <!-- 底部块区：最新上传 / 动态流 / 音乐播放器（水平排列） -->
+    <section class="bottom-panels">
+      <div class="bottom-panel panel-uploads">
+        <div class="panel-head">
+          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          <h3>最新上传</h3>
+        </div>
         <div id="latest-uploads-list">
           <div class="empty-state">暂无内容</div>
         </div>
       </div>
-
-      <!-- 动态流 -->
-      <div class="sidebar-section">
-        <h3>动态流</h3>
+      <div class="bottom-panel panel-activity">
+        <div class="panel-head">
+          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+          <h3>动态流</h3>
+          <button class="post-dynamic-btn" onclick="App.showPostModal()">发动态</button>
+        </div>
         <div id="activity-feed-list">
           <div class="empty-state">暂无动态</div>
         </div>
       </div>
-
-      <!-- 音乐播放器 -->
-      <div class="sidebar-section music-player">
-        <h3>音乐播放器</h3>
+      <div class="bottom-panel panel-music">
+        <div class="panel-head">
+          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+          <h3>音乐</h3>
+        </div>
         <div class="current-song" id="current-song-name">暂无音乐</div>
         <div class="music-controls">
-          <button class="nav-btn" onclick="App.prevMusic()" title="上一首">&lt;&lt;</button>
-          <button class="play-btn" id="play-btn" onclick="App.togglePlay()">&gt;</button>
-          <button class="nav-btn" onclick="App.nextMusic()" title="下一首">&gt;&gt;</button>
+          <button class="nav-btn" onclick="App.prevMusic()" title="上一首">&#9664;</button>
+          <button class="play-btn" id="play-btn" onclick="App.togglePlay()">&#9654;</button>
+          <button class="nav-btn" onclick="App.nextMusic()" title="下一首">&#9654;</button>
         </div>
         <div class="progress-bar" id="progress-bar">
           <div class="fill" id="progress-fill"></div>
         </div>
       </div>
-    </aside>
+    </section>
 
-    <!-- ===== 管理面板 ===== -->
-    <div id="admin-panel" class="admin-panel">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold text-orange-500">管理面板</h2>
-        <button id="admin-panel-close" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-      </div>
+    <!-- 底部 macOS 风格 Dock -->
+    <div class="dock-wrapper">
+      <nav id="dock-bar">
+        <div class="dock-item" data-action="about">
+          <svg class="dock-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="dock-tip">关于我们</span>
+        </div>
+        <div class="dock-item" data-action="contact">
+          <svg class="dock-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+          </svg>
+          <span class="dock-tip">联系我们</span>
+        </div>
+        <div class="dock-item" data-action="contribute">
+          <svg class="dock-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span class="dock-tip">成为贡献者</span>
+        </div>
+        <div class="dock-divider"></div>
+        <div class="dock-item" data-action="files">
+          <svg class="dock-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <span class="dock-tip">文件列表</span>
+        </div>
+      </nav>
+    </div>
 
+    <!-- ===== 管理面板模态框 ===== -->
+    <div id="admin-modal" class="modal-overlay hidden">
+      <div class="modal-container admin-modal-container">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('admin-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('admin-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('admin-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>管理面板</h2>
+          </div>
+        </div>
+        <div class="modal-body" id="admin-panel-body">
       <!-- 创建分类 -->
       <div id="admin-category-section" class="hidden mb-6">
         <div class="section-title">创建分类</div>
@@ -183,14 +217,51 @@
           <div class="empty-state">暂无数据</div>
         </div>
       </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 发动态模态框 ===== -->
+    <div id="post-modal" class="modal-overlay hidden">
+      <div class="modal-container max-w-md">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('post-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('post-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('post-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>发动态</h2>
+          </div>
+        </div>
+        <div class="modal-body">
+          <form id="post-dynamic-form" onsubmit="App.submitPost(event)">
+            <div class="form-group">
+              <label>昵称</label>
+              <input type="text" id="post-author" placeholder="你的昵称（选填）">
+            </div>
+            <div class="form-group">
+              <label>内容</label>
+              <textarea id="post-content" rows="4" required placeholder="分享你的想法..."></textarea>
+            </div>
+            <button type="submit" class="contrib-submit-btn">发布动态</button>
+          </form>
+        </div>
+      </div>
     </div>
 
     <!-- ===== 登录模态框 ===== -->
     <div id="login-modal" class="modal-overlay hidden">
       <div class="modal-container max-w-sm">
         <div class="modal-header">
-          <h2>管理员登录</h2>
-          <button id="login-close" class="modal-close">&times;</button>
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('login-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('login-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('login-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>管理员登录</h2>
+          </div>
         </div>
         <div class="modal-body">
           <form id="login-form">
@@ -212,8 +283,14 @@
     <div id="preview-overlay" class="modal-overlay hidden">
       <div class="modal-container">
         <div class="modal-header">
-          <h2 id="preview-title">文件预览</h2>
-          <button id="preview-close" class="modal-close">&times;</button>
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('preview-overlay','close');Preview.close()" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('preview-overlay','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('preview-overlay','maximize')" title="全屏"></span>
+            </div>
+            <h2 id="preview-title">文件预览</h2>
+          </div>
         </div>
         <div class="modal-body" id="preview-body">
           <p class="text-gray-400 text-center py-8">加载中...</p>
@@ -225,8 +302,14 @@
     <div id="about-modal" class="modal-overlay hidden">
       <div class="modal-container max-w-lg">
         <div class="modal-header">
-          <h2>关于我们</h2>
-          <button class="modal-close" onclick="App.closeModal('about-modal')">&times;</button>
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('about-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('about-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('about-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>关于我们</h2>
+          </div>
         </div>
         <div class="modal-body">
           <div class="about-content">
@@ -264,8 +347,14 @@
     <div id="contact-modal" class="modal-overlay hidden">
       <div class="modal-container max-w-sm">
         <div class="modal-header">
-          <h2>联系我们</h2>
-          <button class="modal-close" onclick="App.closeModal('contact-modal')">&times;</button>
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('contact-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('contact-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('contact-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>联系我们</h2>
+          </div>
         </div>
         <div class="modal-body">
           <div class="contact-info">
@@ -314,8 +403,14 @@
     <div id="contributor-modal" class="modal-overlay hidden">
       <div class="modal-container max-w-md">
         <div class="modal-header">
-          <h2>成为贡献者</h2>
-          <button class="modal-close" onclick="App.closeModal('contributor-modal')">&times;</button>
+          <div class="modal-header-left">
+            <div class="traffic-lights">
+              <span class="traffic-btn red" onclick="App.trafficAction('contributor-modal','close')" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" onclick="App.trafficAction('contributor-modal','minimize')" title="最小化"></span>
+              <span class="traffic-btn green" onclick="App.trafficAction('contributor-modal','maximize')" title="全屏"></span>
+            </div>
+            <h2>成为贡献者</h2>
+          </div>
         </div>
         <div class="modal-body">
           <!-- 类型切换 -->

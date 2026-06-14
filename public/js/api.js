@@ -136,6 +136,13 @@ const FileAPI = {
 const ActivityAPI = {
   getAll() {
     return apiRequest('/api/activities');
+  },
+
+  create(content, author) {
+    return apiRequest('/api/activities', {
+      method: 'POST',
+      body: JSON.stringify({ content, author })
+    });
   }
 };
 

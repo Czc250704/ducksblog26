@@ -2,6 +2,7 @@
 const Preview = {
   modal: null,
   overlay: null,
+  _currentFileId: null,
 
   init() {
     this.overlay = document.getElementById('preview-overlay');
@@ -22,6 +23,7 @@ const Preview = {
   },
 
   async open(fileId) {
+    this._currentFileId = fileId;
     try {
       const titleEl = document.getElementById('preview-title');
       const bodyEl = document.getElementById('preview-body');
@@ -85,6 +87,11 @@ const Preview = {
 
   close() {
     if (this.overlay) this.overlay.classList.add('hidden');
+    // 通知 Dock 移除该文件
+    if (this._currentFileId && typeof App !== 'undefined' && App.removeDockFileItem) {
+      App.removeDockFileItem(this._currentFileId);
+    }
+    this._currentFileId = null;
   },
 
   escapeHtml(str) {

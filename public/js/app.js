@@ -34,15 +34,19 @@ const App = {
       this.handleLogin();
     });
 
-    // 关闭登录框
-    document.getElementById('login-close').addEventListener('click', () => {
-      document.getElementById('login-modal').classList.add('hidden');
-    });
-
-    // 模态框关闭按钮（通用委托）
+    // 模态框关闭按钮（通用委托：点击遮罩层关闭）
     document.getElementById('main-interface').addEventListener('click', (e) => {
       if (e.target.classList.contains('modal-overlay')) {
+        const container = e.target.querySelector('.modal-container');
+        if (container) container.classList.remove('minimized', 'maximized');
         e.target.classList.add('hidden');
+        // 如果是预览窗口，同时清理 dock
+        if (e.target.id === 'preview-overlay') {
+          if (Preview._currentFileId) {
+            App.removeDockFileItem(Preview._currentFileId);
+            Preview._currentFileId = null;
+          }
+        }
       }
     });
 
@@ -67,11 +71,76 @@ const App = {
   },
 
   openModal(modalId) {
-    document.getElementById(modalId).classList.remove('hidden');
+    const overlay = document.getElementById(modalId);
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    // 清除可能残留的状态
+    const container = overlay.querySelector('.modal-container');
+    if (container) {
+      container.classList.remove('minimized', 'maximized');
+    }
   },
 
   closeModal(modalId) {
-    document.getElementById(modalId).classList.add('hidden');
+    const overlay = document.getElementById(modalId);
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    const container = overlay.querySelector('.modal-container');
+    if (container) {
+      container.classList.remove('minimized', 'maximized');
+    }
+  },
+
+  // ===== 红绿灯按钮统一方法 =====
+  // action: 'close' / 'minimize' / 'maximize'
+  trafficAction(modalId, action) {
+    const overlay = document.getElementById(modalId);
+    if (!overlay) return;
+    const container = overlay.querySelector('.modal-container');
+    if (action === 'close') {
+      overlay.classList.add('hidden');
+      if (container) {
+        container.classList.remove('maximized', 'minimized');
+      }
+    } else if (action === 'minimize') {
+      if (container) {
+        if (container.classList.contains('minimized')) {
+          // 点击已最小化的恢复
+          container.classList.remove('minimized');
+        } else {
+          container.classList.remove('maximized');
+          container.classList.add('minimized');
+        }
+      }
+    } else if (action === 'maximize') {
+      if (container) {
+        container.classList.remove('minimized');
+        container.classList.toggle('maximized');
+      }
+    }
+  },
+
+  // ===== 发动态 =====
+  showPostModal() {
+    document.getElementById('post-modal').classList.remove('hidden');
+    document.getElementById('post-author').value = '';
+    document.getElementById('post-content').value = '';
+    document.getElementById('post-content').focus();
+  },
+
+  async submitPost(e) {
+    e.preventDefault();
+    const author = document.getElementById('post-author').value.trim() || '匿名访客';
+    const content = document.getElementById('post-content').value.trim();
+    if (!content) return;
+
+    try {
+      await ActivityAPI.create(content, author);
+      document.getElementById('post-modal').classList.add('hidden');
+      this.loadActivities();
+    } catch (err) {
+      alert('发布失败：' + err.message);
+    }
   },
 
   // ===== 贡献者类型切换 =====
@@ -131,16 +200,18 @@ const App = {
     const overlay = document.getElementById('entry-overlay');
     const mainInterface = document.getElementById('main-interface');
 
-    // Public Studio → Duck's Blog → 主界面
+    // Public Studio (0-2s) -> Duck's Blog (1.6s-3.6s) -> 主界面 (4s+)
+    // CSS 动画自动处理文字淡入淡出
     setTimeout(() => {
       overlay.classList.add('fade-out');
+      // 先设置 visible 类触发 visibility 和动画
       mainInterface.classList.add('visible');
+      // 动画结束 + overlay 淡出后加载数据
       setTimeout(() => {
         overlay.style.display = 'none';
-        // 加载数据
         this.loadAll();
-      }, 600);
-    }, 3000);
+      }, 700);
+    }, 3800);
   },
 
   // ===== 加载所有数据 =====
@@ -152,38 +223,47 @@ const App = {
     this.loadMusic();
   },
 
-  // ===== 分类 =====
+  // ===== 分类（大块卡片） =====
   async loadCategories() {
     try {
       const result = await CategoryAPI.getAll();
       const container = document.getElementById('category-tabs');
-      const allTab = document.getElementById('category-all-tab');
 
       // 更新关于我们分类统计
       const catCountEl = document.getElementById('about-cat-count');
       if (catCountEl) catCountEl.textContent = result.data.length;
 
-      // 清除除"全部"外的标签
-      while (container.children.length > 1) {
-        container.removeChild(container.lastChild);
-      }
+      container.innerHTML = '';
 
-      // 设置"全部"为激活状态
-      allTab.classList.add('active');
-      this.currentCategory = null;
+      // "全部" 卡片
+      const allCard = document.createElement('div');
+      allCard.className = 'category-card all-cat active';
+      allCard.innerHTML =
+        '<div class="cat-name">全部</div>' +
+        '<div class="cat-creator">所有文件</div>' +
+        '<div class="cat-update">' + (result.data.length || 0) + ' 个分类</div>';
+      allCard.addEventListener('click', () => {
+        document.querySelectorAll('.category-card').forEach((c) => c.classList.remove('active'));
+        allCard.classList.add('active');
+        this.currentCategory = null;
+        this.loadFiles();
+      });
+      container.appendChild(allCard);
 
       result.data.forEach((cat) => {
-        const tab = document.createElement('span');
-        tab.className = 'category-tab';
-        tab.textContent = cat.name;
-        tab.addEventListener('click', () => {
-          // 清除所有激活
-          container.querySelectorAll('.category-tab').forEach((t) => t.classList.remove('active'));
-          tab.classList.add('active');
+        const card = document.createElement('div');
+        card.className = 'category-card';
+        card.innerHTML =
+          '<div class="cat-name">' + cat.name + '</div>' +
+          '<div class="cat-creator">创作者: ' + (cat.creator || '-') + '</div>' +
+          '<div class="cat-update">更新: ' + (cat.created_at ? cat.created_at.slice(0, 10) : '-') + '</div>';
+        card.addEventListener('click', () => {
+          document.querySelectorAll('.category-card').forEach((c) => c.classList.remove('active'));
+          card.classList.add('active');
           this.currentCategory = cat.id;
           this.loadFiles(cat.id);
         });
-        container.appendChild(tab);
+        container.appendChild(card);
       });
     } catch (e) {
       console.error('加载分类失败:', e);
@@ -203,12 +283,13 @@ const App = {
 
       container.innerHTML = result.data.map((f) => {
         const ext = (f.original_name || f.filename).split('.').pop().toLowerCase();
+        const safeName = (f.original_name || f.filename).replace(/'/g, "\\'");
         return (
-          '<div class="file-item" onclick="App.previewFile(' + f.id + ')">' +
+          '<div class="file-item" onclick="App.previewFile(' + f.id + ', \'' + safeName + '\')">' +
           '<div class="file-icon"><span>' + ext + '</span></div>' +
           '<div class="file-info">' +
           '<div class="file-name">' + f.original_name + '</div>' +
-          '<div class="file-meta">' + f.category_name + ' / ' + f.creator + ' / ' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + '</div>' +
+          '<div class="file-meta">' + (f.category_name || '') + ' / ' + f.creator + ' / ' + (f.uploaded_at ? f.uploaded_at.slice(0, 10) : '') + '</div>' +
           '</div>' +
           '</div>'
         );
@@ -425,8 +506,46 @@ const App = {
   },
 
   // ===== 文件预览 =====
-  previewFile(fileId) {
+  previewFile(fileId, fileName) {
+    if (fileName) {
+      this.addDockFileItem(fileId, fileName);
+    }
     Preview.open(fileId);
+  },
+
+  // Dock 中添加已打开文件
+  addDockFileItem(fileId, fileName) {
+    const dockBar = document.getElementById('dock-bar');
+    if (!dockBar) return;
+    // 检查是否已存在
+    if (dockBar.querySelector('[data-file-id="' + fileId + '"]')) return;
+
+    const item = document.createElement('div');
+    item.className = 'dock-item open-file';
+    item.dataset.action = 'open-file';
+    item.dataset.fileId = fileId;
+    item.innerHTML =
+      '<svg class="dock-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>' +
+      '</svg>' +
+      '<span class="dock-tip">' + fileName + '</span>';
+    item.addEventListener('click', () => {
+      this.previewFile(fileId);
+    });
+
+    // 插入到分隔线之后（静态固定图标之后）
+    const dividers = dockBar.querySelectorAll('.dock-divider');
+    if (dividers.length > 0) {
+      dockBar.insertBefore(item, dividers[dividers.length - 1].nextSibling);
+    } else {
+      dockBar.appendChild(item);
+    }
+  },
+
+  // 从 Dock 移除已关闭文件
+  removeDockFileItem(fileId) {
+    const item = document.querySelector('.dock-item[data-file-id="' + fileId + '"]');
+    if (item) item.remove();
   },
 
   // ===== 登录 =====
@@ -462,31 +581,37 @@ const App = {
     // 禁用右键菜单
     document.addEventListener('contextmenu', (e) => {
       if (!window._SUPER_ADMIN_MODE_) e.preventDefault();
-    });
+    }, true);
 
     // 禁用 F12 和开发者工具快捷键
     document.addEventListener('keydown', (e) => {
       if (window._SUPER_ADMIN_MODE_) return;
-      if (e.key === 'F12') {
+      // F12
+      if (e.key === 'F12' || e.keyCode === 123) {
         e.preventDefault();
         return false;
       }
-      // Ctrl+Shift+I
-      if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i')) {
+      // Ctrl+Shift+I / C
+      if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'C' || e.key === 'c' || e.keyCode === 73 || e.keyCode === 67)) {
         e.preventDefault();
         return false;
       }
       // Ctrl+Shift+J
-      if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j' || e.keyCode === 74)) {
         e.preventDefault();
         return false;
       }
       // Ctrl+U
-      if (e.ctrlKey && (e.key === 'u' || e.key === 'U')) {
+      if (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.keyCode === 85)) {
         e.preventDefault();
         return false;
       }
-    });
+      // Ctrl+S
+      if (e.ctrlKey && (e.key === 's' || e.key === 'S' || e.keyCode === 83)) {
+        e.preventDefault();
+        return false;
+      }
+    }, true);
 
     // 检测开发者工具（简单版）
     setInterval(() => {
