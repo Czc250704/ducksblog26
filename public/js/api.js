@@ -187,124 +187,75 @@ const FileAPI = {
 
     if (!file) throw new Error('文件不存在');
 
-    // 判断 storage_path 是 GitHub 直链还是 Supabase 路径
-    const isGitHubUrl = file.storage_path && file.storage_path.startsWith('https://');
+    // 判断存储路径类型：GitHub blob / Supabase 路径 / 其他直链
+    const gitHubBlobMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
+    const isSupabasePath = !file.storage_path || !file.storage_path.startsWith('https://');
 
-    // GitHub blob URL → jsDelivr CDN URL（支持 CORS，国内速度快）
-    function toJsDelivr(gitHubMatch) {
-      return 'https://cdn.jsdelivr.net/gh/' + gitHubMatch[1] + '@' + gitHubMatch[2] + '/' + gitHubMatch[3];
+    // GitHub blob → 同域路径（同源请求，零 CORS）
+    function toSameOrigin(blobMatch) {
+      // https://github.com/user/repo/blob/main/storage/approved/f.md → /storage/approved/f.md
+      return '/' + decodeURIComponent(blobMatch[3]);
     }
 
-    // 根据类型返回不同的预览信息
+    // ===== Office 文件（Word/PPT）：返回可访问的公开 URL =====
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
-      let publicUrl;
-      
-      // 判断是否为 GitHub URL
-      const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
-      
-      if (gitHubMatch) {
-        publicUrl = toJsDelivr(gitHubMatch); // 用 jsDelivr（支持 CORS）
-      } else if (isGitHubUrl) {
-        publicUrl = file.storage_path;
+      let previewUrl;
+
+      if (gitHubBlobMatch) {
+        // 同域绝对路径，Office Online 可直接加载
+        previewUrl = location.origin + toSameOrigin(gitHubBlobMatch);
+      } else if (isSupabasePath) {
+        const { data: urlData } = sb.storage.from('blog-files').getPublicUrl(file.storage_path);
+        previewUrl = urlData.publicUrl;
       } else {
-        const { data: urlData } = sb.storage
-          .from('blog-files')
-          .getPublicUrl(file.storage_path);
-        publicUrl = urlData.publicUrl;
+        previewUrl = file.storage_path;
       }
 
       return {
         success: true,
-        data: {
-          ...file,
-          previewUrl: publicUrl,
-          type: file.file_type,
-        }
+        data: { ...file, previewUrl, type: file.file_type }
       };
     }
 
-    // MD/TXT：获取文件内容（多源降级）
+    // ===== 文本文件（MD/TXT）：读取内容并返回 =====
     if (['md', 'txt'].includes(file.file_type)) {
-      let text = null;
-      let lastError = '';
+      let text;
 
-      // 判断是否为 GitHub URL
-      const gitHubMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
-      
-      // 方案0：jsDelivr CDN（GitHub 文件首选，支持 CORS）
-      if (gitHubMatch && !text) {
-        try {
-          const cdnUrl = toJsDelivr(gitHubMatch);
-          const res = await fetch(cdnUrl);
-          if (res.ok) {
-            text = await res.text();
-          } else {
-            lastError = 'jsDelivr CDN: HTTP ' + res.status;
-          }
-        } catch (e) { lastError = 'jsDelivr异常: ' + e.message; }
+      if (gitHubBlobMatch) {
+        // 同域 fetch，零 CORS 问题
+        const res = await fetch(toSameOrigin(gitHubBlobMatch));
+        if (!res.ok) throw new Error('文件读取失败 (HTTP ' + res.status + ')');
+        text = await res.text();
+      } else if (isSupabasePath) {
+        // Supabase Storage 文件
+        const { data: content, error } = await sb.storage.from('blog-files').download(file.storage_path);
+        if (error) throw new Error('文件读取失败: ' + error.message);
+        text = await content.text();
+      } else {
+        // 其他直链
+        const res = await fetch(file.storage_path);
+        if (!res.ok) throw new Error('文件读取失败 (HTTP ' + res.status + ')');
+        text = await res.text();
       }
-
-      // 方案1：通过 Supabase client 下载
-      if (!text && !gitHubMatch) {
-        try {
-          const { data: content, error } = await sb.storage
-            .from('blog-files')
-            .download(file.storage_path);
-          if (!error && content) {
-            text = await content.text();
-          } else {
-            lastError = 'Supabase客户端: ' + (error?.message || '未知错误');
-          }
-        } catch (e) { lastError = 'Supabase异常: ' + e.message; }
-      }
-
-      // 方案2：公共 URL 直接获取
-      if (!text && !gitHubMatch) {
-        try {
-          const { data: urlData } = sb.storage
-            .from('blog-files')
-            .getPublicUrl(file.storage_path);
-          const res = await fetch(urlData.publicUrl, { mode: 'cors' });
-          if (res.ok) {
-            text = await res.text();
-          } else {
-            lastError = '公共URL: HTTP ' + res.status;
-          }
-        } catch (e) { lastError = 'Fetch异常: ' + e.message; }
-      }
-
-      if (!text) throw new Error('文件读取失败 (' + lastError + ')');
 
       return {
         success: true,
-        data: {
-          ...file,
-          content: text,
-          type: file.file_type,
-        }
+        data: { ...file, content: text, type: file.file_type }
       };
     }
 
-    // 音乐文件：返回公共播放 URL
+    // ===== 音乐文件 =====
     if (file.file_type === 'music') {
       let musicUrl;
-      const isGitHubMusic = file.storage_path && file.storage_path.startsWith('https://');
-      if (isGitHubMusic) {
-        musicUrl = file.storage_path;
-      } else {
-        const bucketName = 'blog-music';
-        const { data: urlData } = sb.storage
-          .from(bucketName)
-          .getPublicUrl(file.storage_path);
+      if (isSupabasePath) {
+        const { data: urlData } = sb.storage.from('blog-music').getPublicUrl(file.storage_path);
         musicUrl = urlData.publicUrl;
+      } else {
+        musicUrl = file.storage_path;
       }
       return {
         success: true,
-        data: {
-          ...file,
-          previewUrl: musicUrl,
-          type: file.file_type,
-        }
+        data: { ...file, previewUrl: musicUrl, type: file.file_type }
       };
     }
 
