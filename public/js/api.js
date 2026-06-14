@@ -220,11 +220,22 @@ const FileAPI = {
         const res = await fetch(file.storage_path);
         text = await res.text();
       } else {
+        // 方案1：通过 Supabase client 下载（带 auth header）
         const { data: content, error } = await sb.storage
           .from('blog-files')
           .download(file.storage_path);
-        if (error) throw new Error('文件读取失败');
-        text = await content.text();
+
+        if (!error && content) {
+          text = await content.text();
+        } else {
+          // 方案2：降级到公共 URL 直接获取（无需 auth）
+          const { data: urlData } = sb.storage
+            .from('blog-files')
+            .getPublicUrl(file.storage_path);
+          const res = await fetch(urlData.publicUrl);
+          if (!res.ok) throw new Error('文件读取失败：' + res.status);
+          text = await res.text();
+        }
       }
 
       return {
@@ -232,6 +243,29 @@ const FileAPI = {
         data: {
           ...file,
           content: text,
+          type: file.file_type,
+        }
+      };
+    }
+
+    // 音乐文件：返回公共播放 URL
+    if (file.file_type === 'music') {
+      let musicUrl;
+      const isGitHubMusic = file.storage_path && file.storage_path.startsWith('https://');
+      if (isGitHubMusic) {
+        musicUrl = file.storage_path;
+      } else {
+        const bucketName = 'blog-music';
+        const { data: urlData } = sb.storage
+          .from(bucketName)
+          .getPublicUrl(file.storage_path);
+        musicUrl = urlData.publicUrl;
+      }
+      return {
+        success: true,
+        data: {
+          ...file,
+          previewUrl: musicUrl,
           type: file.file_type,
         }
       };
