@@ -175,88 +175,96 @@ const FileAPI = {
     return edgeRequest('get-my-uploads');
   },
 
-  // 获取文件预览内容
+  // 获取文件预览内容（一次性彻底修复所有格式 + 所有 CORS 问题）
   async preview(fileId) {
-    // 先从 files 表获取文件信息
     const { data: file } = await sb
       .from('files')
       .select('*')
       .eq('id', fileId)
-      .neq('status', 'pending') // 确保不泄露待审核文件
+      .neq('status', 'pending')
       .single();
 
     if (!file) throw new Error('文件不存在');
 
-    // 判断存储路径类型：GitHub blob / Supabase 路径 / 其他直链
-    const gitHubBlobMatch = file.storage_path && file.storage_path.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
-    const isSupabasePath = !file.storage_path || !file.storage_path.startsWith('https://');
+    const sp = file.storage_path || '';
 
-    // GitHub blob → 同域路径（同源请求，零 CORS）
-    function toSameOrigin(blobMatch) {
-      // https://github.com/user/repo/blob/main/storage/approved/f.md → /storage/approved/f.md
-      return '/' + decodeURIComponent(blobMatch[3]);
+    // 从各种 GitHub URL 格式中提取仓库内路径
+    function extractRepoPath(url) {
+      // 格式1：github.com/blob
+      let m = url.match(/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\/(.+)/);
+      if (m) return decodeURIComponent(m[1]);
+      // 格式2：raw.githubusercontent.com
+      m = url.match(/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.+)/);
+      if (m) return decodeURIComponent(m[1]);
+      // 格式3：jsdelivr CDN
+      m = url.match(/jsdelivr\.net\/gh\/[^@]+@[^/]+\/(.+)/);
+      if (m) return decodeURIComponent(m[1]);
+      return null;
     }
 
-    // ===== Office 文件（Word/PPT）：返回可访问的公开 URL =====
+    // 判断是否为 GitHub 相关 URL（任何格式）
+    const repoPath = extractRepoPath(sp);
+    const isGitHubFile = !!repoPath;
+    const isSupabasePath = !sp.startsWith('https://');
+
+    // 同域绝对路径，零 CORS
+    function sameOriginUrl(path) {
+      return location.origin + '/' + path;
+    }
+
+    // ===== Office 文件 =====
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
       let previewUrl;
 
-      if (gitHubBlobMatch) {
-        // 同域绝对路径，Office Online 可直接加载
-        previewUrl = location.origin + toSameOrigin(gitHubBlobMatch);
+      if (isGitHubFile) {
+        previewUrl = sameOriginUrl(repoPath);
       } else if (isSupabasePath) {
-        const { data: urlData } = sb.storage.from('blog-files').getPublicUrl(file.storage_path);
-        previewUrl = urlData.publicUrl;
+        previewUrl = sb.storage.from('blog-files').getPublicUrl(sp).data.publicUrl;
       } else {
-        previewUrl = file.storage_path;
+        previewUrl = sp;
       }
-
-      return {
-        success: true,
-        data: { ...file, previewUrl, type: file.file_type }
-      };
+      return { success: true, data: { ...file, previewUrl, type: file.file_type } };
     }
 
-    // ===== 文本文件（MD/TXT）：读取内容并返回 =====
+    // ===== 文本文件 MD/TXT =====
     if (['md', 'txt'].includes(file.file_type)) {
       let text;
 
-      if (gitHubBlobMatch) {
-        // 同域 fetch，零 CORS 问题
-        const res = await fetch(toSameOrigin(gitHubBlobMatch));
-        if (!res.ok) throw new Error('文件读取失败 (HTTP ' + res.status + ')');
-        text = await res.text();
+      if (isGitHubFile) {
+        // 策略A：同域 fetch（最可靠，零 CORS）
+        try {
+          const r = await fetch('/' + repoPath);
+          if (r.ok) { text = await r.text(); }
+        } catch(e) {}
+
+        // 策略B：如果同域失败（文件可能还没部署），用 GitHub API
+        if (!text && sp.includes('github.com')) {
+          try {
+            const r = await fetch(sp.replace('github.com/', 'api.github.com/repos/').replace('/blob/', '/contents/'), {
+              headers: { Accept: 'application/vnd.github.v3.raw' }
+            });
+            if (r.ok) text = await r.text();
+          } catch(e) {}
+        }
+        if (!text) throw new Error('文件读取失败，请稍后重试（GitHub 部署中）');
       } else if (isSupabasePath) {
-        // Supabase Storage 文件
-        const { data: content, error } = await sb.storage.from('blog-files').download(file.storage_path);
-        if (error) throw new Error('文件读取失败: ' + error.message);
+        const { data: content, error } = await sb.storage.from('blog-files').download(sp);
+        if (error) throw new Error('Storage读取失败: ' + error.message);
         text = await content.text();
       } else {
-        // 其他直链
-        const res = await fetch(file.storage_path);
-        if (!res.ok) throw new Error('文件读取失败 (HTTP ' + res.status + ')');
-        text = await res.text();
+        const r = await fetch(sp);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        text = await r.text();
       }
-
-      return {
-        success: true,
-        data: { ...file, content: text, type: file.file_type }
-      };
+      return { success: true, data: { ...file, content: text, type: file.file_type } };
     }
 
-    // ===== 音乐文件 =====
+    // ===== 音乐 =====
     if (file.file_type === 'music') {
-      let musicUrl;
-      if (isSupabasePath) {
-        const { data: urlData } = sb.storage.from('blog-music').getPublicUrl(file.storage_path);
-        musicUrl = urlData.publicUrl;
-      } else {
-        musicUrl = file.storage_path;
-      }
-      return {
-        success: true,
-        data: { ...file, previewUrl: musicUrl, type: file.file_type }
-      };
+      const musicUrl = isSupabasePath
+        ? sb.storage.from('blog-music').getPublicUrl(sp).data.publicUrl
+        : (isGitHubFile ? sameOriginUrl(repoPath) : sp);
+      return { success: true, data: { ...file, previewUrl: musicUrl, type: file.file_type } };
     }
 
     return { success: true, data: { ...file, type: file.file_type } };
