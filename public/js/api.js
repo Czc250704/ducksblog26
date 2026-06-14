@@ -187,18 +187,26 @@ const FileAPI = {
 
     if (!file) throw new Error('文件不存在');
 
+    // 判断 storage_path 是 GitHub 直链还是 Supabase 路径
+    const isGitHubUrl = file.storage_path && file.storage_path.startsWith('https://');
+
     // 根据类型返回不同的预览信息
     if (['ppt', 'pptx', 'doc', 'docx'].includes(file.file_type)) {
-      // Office 文件：返回公开 Storage URL
-      const { data: urlData } = sb.storage
-        .from('blog-files')
-        .getPublicUrl(file.storage_path);
+      let publicUrl;
+      if (isGitHubUrl) {
+        publicUrl = file.storage_path; // 直接用 GitHub URL
+      } else {
+        const { data: urlData } = sb.storage
+          .from('blog-files')
+          .getPublicUrl(file.storage_path);
+        publicUrl = urlData.publicUrl;
+      }
 
       return {
         success: true,
         data: {
           ...file,
-          previewUrl: urlData.publicUrl,
+          previewUrl: publicUrl,
           type: file.file_type,
         }
       };
@@ -206,13 +214,19 @@ const FileAPI = {
 
     // MD/TXT：获取文件内容
     if (['md', 'txt'].includes(file.file_type)) {
-      const { data: content, error } = await sb.storage
-        .from('blog-files')
-        .download(file.storage_path);
+      let text;
+      if (isGitHubUrl) {
+        // 从 GitHub 直链获取
+        const res = await fetch(file.storage_path);
+        text = await res.text();
+      } else {
+        const { data: content, error } = await sb.storage
+          .from('blog-files')
+          .download(file.storage_path);
+        if (error) throw new Error('文件读取失败');
+        text = await content.text();
+      }
 
-      if (error) throw new Error('文件读取失败');
-
-      const text = await content.text();
       return {
         success: true,
         data: {

@@ -7,6 +7,8 @@ import bcrypt from 'npm:bcryptjs@2';
 const SUPABASE_URL = Deno.env.get('DB_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SERVICE_ROLE_KEY')!;
 const JWT_SECRET = Deno.env.get('JWT_SECRET') || 'ducksblog_secret_key_2026';
+const GITHUB_TOKEN = Deno.env.get('GITHUB_TOKEN') || '';
+const GITHUB_REPO = Deno.env.get('GITHUB_REPO') || 'czc250704/ducksblog26';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -202,10 +204,26 @@ Deno.serve(async (req: Request) => {
           return jsonResponse({ success: false, error: '缺少必要参数' });
         }
 
+        // 确保存在「音乐」分类，没有则自动创建
+        let { data: musicCat } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', '音乐')
+          .maybeSingle();
+        
+        if (!musicCat) {
+          const { data: newCat } = await supabase
+            .from('categories')
+            .insert({ name: '音乐', creator: user.username, created_at: new Date().toISOString() })
+            .select('id')
+            .single();
+          musicCat = newCat;
+        }
+
         const { data: music, error } = await supabase
           .from('files')
           .insert({
-            category_id: 0, // 音乐用 category_id = 0
+            category_id: musicCat.id,
             filename: name,
             original_name: name,
             creator: user.username,
@@ -245,33 +263,100 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // ===== 审批通过 =====
+      // ===== 审批通过（同步文件到 GitHub，释放 Storage 空间） =====
       case 'approve-file': {
         if (!user || user.role !== 'super') return forbidden();
         const { id } = data || body;
         if (!id) return jsonResponse({ success: false, error: '缺少文件 ID' });
 
-        const { error } = await supabase
+        // 获取文件完整信息
+        const { data: fileRecord } = await supabase
           .from('files')
-          .update({
-            status: 'approved',
-            approved_at: new Date().toISOString(),
-          })
+          .select('*')
+          .eq('id', parseInt(id))
+          .single();
+
+        if (!fileRecord) return jsonResponse({ success: false, error: '文件不存在' });
+
+        let githubUrl = '';
+        let syncNote = '';
+
+        // 如果配置了 GitHub Token，尝试上传到 GitHub
+        if (GITHUB_TOKEN && fileRecord.storage_path) {
+          try {
+            // 从 Supabase Storage 下载文件
+            const { data: fileBlob, error: downloadErr } = await supabase.storage
+              .from('blog-files')
+              .download(fileRecord.storage_path);
+
+            if (!downloadErr && fileBlob) {
+              const buffer = await fileBlob.arrayBuffer();
+              const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+              // 推送到 GitHub：storage/approved/ 目录
+              const dateStr = new Date().toISOString().slice(0, 10);
+              const githubPath = `storage/approved/${dateStr}_${fileRecord.original_name}`;
+
+              const ghRes = await fetch(
+                `https://api.github.com/repos/${GITHUB_REPO}/contents/${githubPath}`,
+                {
+                  method: 'PUT',
+                  headers: {
+                    Authorization: `token ${GITHUB_TOKEN}`,
+                    'Content-Type': 'application/json',
+                    Accept: 'application/vnd.github.v3+json',
+                  },
+                  body: JSON.stringify({
+                    message: `approve: ${fileRecord.original_name}`,
+                    content: base64,
+                    branch: 'main',
+                  }),
+                }
+              );
+
+              if (ghRes.ok) {
+                const ghData = await ghRes.json();
+                githubUrl = ghData.content?.download_url || '';
+                syncNote = '已同步到 GitHub';
+
+                // 从 Supabase Storage 删除，释放空间
+                await supabase.storage
+                  .from('blog-files')
+                  .remove([fileRecord.storage_path]);
+              }
+            }
+          } catch (gitErr) {
+            console.error('GitHub 同步失败，文件保留在 Supabase:', gitErr);
+            syncNote = 'GitHub 同步暂未成功，待网络畅通时自动重试';
+          }
+        }
+
+        // 更新数据库记录
+        const updateData: any = {
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+        };
+        if (githubUrl) {
+          updateData.storage_path = githubUrl; // 改为 GitHub URL
+        }
+
+        const { error: updateErr } = await supabase
+          .from('files')
+          .update(updateData)
           .eq('id', parseInt(id));
 
-        if (error) return jsonResponse({ success: false, error: error.message });
+        if (updateErr) return jsonResponse({ success: false, error: updateErr.message });
 
         // 记录动态
-        const { data: f } = await supabase.from('files').select('original_name').eq('id', parseInt(id)).single();
         await supabase.from('activities').insert({
           type: 'approve',
-          content: `审批通过了「${f?.original_name || '文件'}」`,
+          content: `审批通过了「${fileRecord.original_name}」${syncNote ? '（' + syncNote + '）' : ''}`,
           author: user.username,
           related_id: parseInt(id),
           created_at: new Date().toISOString(),
         });
 
-        return jsonResponse({ success: true, data: { id, status: 'approved' } });
+        return jsonResponse({ success: true, data: { id, status: 'approved', syncNote } });
       }
 
       // ===== 拒绝文件 =====

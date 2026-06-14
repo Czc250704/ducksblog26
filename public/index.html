@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <link rel="stylesheet" href="css/style.css">
   <script>
-    // 最早阶段禁用 F12/右键（不等任何资源加载）
+    // 禁用 F12/右键（
     (function(){
       window._SUPER_ADMIN_MODE_ = false;
       document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);
@@ -78,7 +78,7 @@
           <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
           </svg>
-          <h3>动态流</h3>
+          <h3>动态</h3>
           <button class="post-dynamic-btn" onclick="App.showPostModal()">发动态</button>
         </div>
         <div id="activity-feed-list">
@@ -239,7 +239,7 @@
           <form id="post-dynamic-form" onsubmit="App.submitPost(event)">
             <div class="form-group">
               <label>昵称</label>
-              <input type="text" id="post-author" placeholder="你的昵称（选填）">
+              <input type="text" id="post-author" placeholder="你的昵称">
             </div>
             <div class="form-group">
               <label>内容</label>
@@ -316,11 +316,10 @@
           <div class="about-content">
             <div class="about-brand">
               <div class="about-logo">D</div>
-              <h3>Duck's Blog - Public Studio</h3>
+              <h3>Duck's Blog * Public Studio</h3>
             </div>
             <p class="about-desc">
-              一个面向公众的开放知识分享平台，致力于提供高质量的技术文档、项目经验与创意思考。
-              我们相信知识应该自由流动，每一位访客都可以无障碍地浏览和学习。
+              一个面向公众的开放知识分享平台，支持多种文件样式，每一位访客都可以无障碍地浏览和学习。
             </p>
             <div class="about-stats">
               <div class="stat-item">
@@ -337,7 +336,7 @@
               </div>
             </div>
             <div class="about-footer">
-              <p>Public Studio 始于 2026，用心做好每一份内容。</p>
+              <p>Public Studio © 2025</p>
             </div>
           </div>
         </div>
@@ -367,7 +366,7 @@
               </div>
               <div>
                 <div class="contact-label">电子邮箱</div>
-                <div class="contact-value">ducksblog@qd.je</div>
+                <div class="contact-value">xsh3304832000@163.com</div>
               </div>
             </div>
             <div class="contact-item">
@@ -389,7 +388,7 @@
               </div>
               <div>
                 <div class="contact-label">所在地</div>
-                <div class="contact-value">在线运营，全球可达</div>
+                <div class="contact-value">中国大陆</div>
               </div>
             </div>
           </div>
