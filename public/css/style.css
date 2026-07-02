@@ -2265,3 +2265,82 @@ body {
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(249, 115, 22, 0.3);
 }
+
+/* ===== Git 管理 UI ===== */
+.git-file-list {
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid #f3f4f6;
+  border-radius: 0.5rem;
+  padding: 4px 0;
+  background: #fafafa;
+}
+
+.git-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  color: #374151;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.git-file-item:last-child {
+  border-bottom: none;
+}
+
+.git-file-item .gfi-name {
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.git-file-item .gfi-meta {
+  font-size: 0.65rem;
+  color: #9ca3af;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.git-log-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.7rem;
+  border-bottom: 1px solid #f9fafb;
+}
+
+.git-log-item:last-child {
+  border-bottom: none;
+}
+
+.git-log-sha {
+  font-family: monospace;
+  font-size: 0.65rem;
+  color: #f97316;
+  background: #fff7ed;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.git-log-msg {
+  flex: 1;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-log-meta {
+  font-size: 0.6rem;
+  color: #9ca3af;
+  flex-shrink: 0;
+}

@@ -46,6 +46,15 @@ const Admin = {
     if (refreshUsers) {
       refreshUsers.addEventListener('click', () => this.loadUsers());
     }
+
+    // Git 状态刷新按钮
+    const gitRefreshBtn = document.getElementById('git-refresh-btn');
+    if (gitRefreshBtn) {
+      gitRefreshBtn.addEventListener('click', () => {
+        this.refreshGitStatus();
+        this.loadGitLog();
+      });
+    }
   },
 
   togglePanel() {
@@ -74,6 +83,9 @@ const Admin = {
     if (Auth.isSuperAdmin()) {
       this.loadUsers();
       this.loadAnnouncements();
+      document.getElementById('admin-github-section').classList.remove('hidden');
+      this.refreshGitStatus();
+      this.loadGitLog();
     }
   },
 
@@ -86,6 +98,15 @@ const Admin = {
         select.innerHTML = '<option value="">请选择分类</option>';
         result.data.forEach((cat) => {
           select.innerHTML += '<option value="' + cat.id + '">' + cat.name + '</option>';
+        });
+      }
+
+      // 同步填充 Git 拉取的分类选择器
+      const pullSelect = document.getElementById('git-pull-category');
+      if (pullSelect) {
+        pullSelect.innerHTML = '<option value="">选择拉取目标分类</option>';
+        result.data.forEach((cat) => {
+          pullSelect.innerHTML += '<option value="' + cat.id + '">' + cat.name + '</option>';
         });
       }
 
@@ -237,9 +258,8 @@ const Admin = {
       await FileAPI.approve(id);
       this.loadPendingFiles();
       this.loadMyUploads();
-      App.loadFiles();
+      App.loadLibraryFiles();
       App.loadActivities();
-      App.loadLatestUploads();
     } catch (e) {
       alert('审批失败：' + e.message);
     }
@@ -403,6 +423,181 @@ const Admin = {
       this.loadAnnouncements();
     } catch (e) {
       alert('删除失败：' + e.message);
+    }
+  },
+
+  // ===== Git 管理 =====
+  gitData: { toPush: [], toPull: [], inSync: [], stats: { toPush: 0, toPull: 0, inSync: 0 } },
+
+  // 刷新 Git 状态
+  async refreshGitStatus() {
+    const statusBar = document.getElementById('git-status-bar');
+    if (!statusBar) return;
+
+    try {
+      const result = await AdminAPI.getGitStatus();
+      const d = result.data;
+
+      if (!d.configured) {
+        statusBar.innerHTML = '<span class="text-red-500 text-xs">未配置 REPO_URL 或 GITHUB_TOKEN</span>';
+        return;
+      }
+
+      this.gitData = d;
+
+      // 更新状态条
+      document.getElementById('git-branch').textContent = d.branch || 'main';
+      document.getElementById('git-push-count').textContent = d.stats.toPush;
+      document.getElementById('git-pull-count').textContent = d.stats.toPull;
+      document.getElementById('git-sync-count').textContent = d.stats.inSync;
+
+      // 渲染待推送列表
+      this.renderPushList(d.toPush);
+      // 渲染待拉取列表
+      this.renderPullList(d.toPull);
+    } catch (e) {
+      statusBar.innerHTML = '<span class="text-red-500 text-xs">获取状态失败: ' + e.message + '</span>';
+    }
+  },
+
+  renderPushList(files) {
+    const container = document.getElementById('git-push-list');
+    const badge = document.getElementById('git-push-badge');
+    if (!container) return;
+    if (files.length === 0) {
+      container.innerHTML = '<div class="empty-state text-xs">无待推送文件</div>';
+      if (badge) badge.textContent = '0 个';
+      return;
+    }
+    if (badge) badge.textContent = files.length + ' 个';
+    container.innerHTML = files.map((f) =>
+      '<div class="git-file-item">' +
+      '<span class="gfi-name">' + f.name + '</span>' +
+      '<span class="gfi-meta">' + (f.creator || '?') + '</span>' +
+      '</div>'
+    ).join('');
+  },
+
+  renderPullList(files) {
+    const container = document.getElementById('git-pull-list');
+    const badge = document.getElementById('git-pull-badge');
+    if (!container) return;
+    if (files.length === 0) {
+      container.innerHTML = '<div class="empty-state text-xs">无待拉取文件</div>';
+      if (badge) badge.textContent = '0 个';
+      return;
+    }
+    if (badge) badge.textContent = files.length + ' 个';
+    container.innerHTML = files.map((f) =>
+      '<div class="git-file-item">' +
+      '<span class="gfi-name">' + f.name + '</span>' +
+      '<span class="gfi-meta">' + (f.size ? (f.size / 1024).toFixed(1) + ' KB' : '') + '</span>' +
+      '</div>'
+    ).join('');
+  },
+
+  // 推送到 GitHub
+  async gitPush() {
+    const btn = document.getElementById('git-push-btn');
+    const resultEl = document.getElementById('git-action-result');
+    if (!btn) return;
+
+    if (this.gitData.stats.toPush === 0) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-yellow-600';
+      resultEl.textContent = '没有待推送的文件';
+      return;
+    }
+
+    if (!confirm('推送 ' + this.gitData.stats.toPush + ' 个文件到 GitHub 远程仓库？')) return;
+
+    btn.disabled = true;
+    btn.textContent = '推送中...';
+    resultEl.classList.add('hidden');
+
+    try {
+      const result = await AdminAPI.gitPush();
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-green-600';
+      resultEl.textContent = result.data.message;
+      this.refreshGitStatus();
+      this.loadGitLog();
+    } catch (e) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-red-600';
+      resultEl.textContent = '推送失败: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '推送到 GitHub';
+    }
+  },
+
+  // 从 GitHub 拉取
+  async gitPull() {
+    const select = document.getElementById('git-pull-category');
+    const categoryId = select.value;
+    const resultEl = document.getElementById('git-action-result');
+    const btn = document.getElementById('git-pull-btn');
+    if (!btn) return;
+
+    if (!categoryId) {
+      alert('请选择拉取文件的目标分类');
+      return;
+    }
+
+    if (this.gitData.stats.toPull === 0) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-yellow-600';
+      resultEl.textContent = '没有待拉取的文件';
+      return;
+    }
+
+    if (!confirm('拉取 ' + this.gitData.stats.toPull + ' 个文件到本地？')) return;
+
+    btn.disabled = true;
+    btn.textContent = '拉取中...';
+    resultEl.classList.add('hidden');
+
+    try {
+      const result = await AdminAPI.gitPull(parseInt(categoryId));
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-green-600';
+      resultEl.textContent = result.data.message;
+
+      this.refreshGitStatus();
+      this.loadGitLog();
+      this.loadMyUploads();
+      App.loadLibraryFiles();
+      App.loadActivities();
+    } catch (e) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'text-xs text-red-600';
+      resultEl.textContent = '拉取失败: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '从 GitHub 拉取';
+    }
+  },
+
+  // 加载提交历史
+  async loadGitLog() {
+    const container = document.getElementById('git-log-list');
+    if (!container) return;
+    try {
+      const result = await AdminAPI.getGitLog();
+      if (result.data.length === 0) {
+        container.innerHTML = '<div class="empty-state text-xs">暂无提交记录</div>';
+        return;
+      }
+      container.innerHTML = result.data.map((c) =>
+        '<div class="git-log-item">' +
+        '<span class="git-log-sha">' + c.sha + '</span>' +
+        '<span class="git-log-msg" title="' + (c.message || '').replace(/"/g, '&quot;') + '">' + (c.message || '') + '</span>' +
+        '<span class="git-log-meta">' + (c.author || '') + ' / ' + (c.date ? c.date.slice(0, 10) : '') + '</span>' +
+        '</div>'
+      ).join('');
+    } catch (e) {
+      container.innerHTML = '<div class="empty-state text-xs">加载失败</div>';
     }
   }
 };

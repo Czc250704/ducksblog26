@@ -265,6 +265,148 @@ async function syncToGit(filePath, filename) {
   });
 }
 
+// 解析仓库信息
+function getRepoInfo() {
+  const repoUrl = process.env.REPO_URL;
+  const token = process.env.GITHUB_TOKEN;
+  if (!repoUrl || !token) return null;
+  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(\.git)?$/);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2], token: token };
+}
+
+// 从 GitHub 仓库获取文件列表
+async function fetchGithubFileList() {
+  const info = getRepoInfo();
+  if (!info) return [];
+  const { owner, repo, token } = info;
+
+  return new Promise((resolve) => {
+    const https = require('https');
+    const apiPath = '/repos/' + owner + '/' + repo + '/contents/storage/approved';
+    const options = {
+      hostname: 'api.github.com',
+      path: apiPath,
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'ducksblog'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const items = JSON.parse(data);
+            const files = items.filter((item) => item.type === 'file')
+              .map((item) => ({
+                name: item.name,
+                path: item.path,
+                downloadUrl: item.download_url,
+                sha: item.sha,
+                size: item.size
+              }));
+            resolve(files);
+          } catch (e) {
+            console.error('GitHub API 响应解析失败:', e.message);
+            resolve([]);
+          }
+        } else if (res.statusCode === 404) {
+          resolve([]);
+        } else {
+          console.error('GitHub API 错误: HTTP ' + res.statusCode + ' - ' + data.substring(0, 200));
+          resolve([]);
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      console.error('GitHub 文件列表获取失败:', e.message);
+      resolve([]);
+    });
+
+    req.end();
+  });
+}
+
+// 获取 GitHub 仓库最近提交记录
+async function fetchGithubCommitLog(maxCount) {
+  const info = getRepoInfo();
+  if (!info) return [];
+  const { owner, repo, token } = info;
+
+  return new Promise((resolve) => {
+    const https = require('https');
+    const apiPath = '/repos/' + owner + '/' + repo + '/commits?sha=main&per_page=' + (maxCount || 10);
+    const options = {
+      hostname: 'api.github.com',
+      path: apiPath,
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'ducksblog'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const commits = JSON.parse(data);
+            resolve(commits.map((c) => ({
+              sha: c.sha.substring(0, 7),
+              message: c.commit.message,
+              author: c.commit.author.name,
+              date: c.commit.author.date
+            })));
+          } catch (e) {
+            resolve([]);
+          }
+        } else {
+          resolve([]);
+        }
+      });
+    });
+
+    req.on('error', () => resolve([]));
+    req.end();
+  });
+}
+
+// 从 GitHub 下载单个文件到本地 approved 目录
+async function downloadFromGithub(downloadUrl, localPath) {
+  return new Promise((resolve) => {
+    const https = require('https');
+    https.get(downloadUrl, (res) => {
+      if (res.statusCode !== 200) {
+        console.error('下载失败: HTTP ' + res.statusCode);
+        resolve(false);
+        return;
+      }
+      const writeStream = fs.createWriteStream(localPath);
+      res.pipe(writeStream);
+      writeStream.on('finish', () => {
+        writeStream.close();
+        resolve(true);
+      });
+      writeStream.on('error', (e) => {
+        console.error('写入文件失败:', e.message);
+        resolve(false);
+      });
+    }).on('error', (e) => {
+      console.error('下载请求失败:', e.message);
+      resolve(false);
+    });
+  });
+}
+
 // ========== API 路由 ==========
 
 // 健康检查
@@ -601,6 +743,213 @@ app.delete('/api/admin/reject/:id', authMiddleware, superAuthMiddleware, async (
     .eq('id', parseInt(id));
 
   res.json({ success: true, data: { message: '文件已拒绝' } });
+});
+
+// ========== Git 管理 API（仅 super） ==========
+
+// 获取 Git 状态：待推送、待拉取、已同步文件列表
+app.get('/api/admin/git/status', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const info = getRepoInfo();
+  if (!info) {
+    return res.json({ success: true, data: { configured: false, message: '未配置 REPO_URL 或 GITHUB_TOKEN' } });
+  }
+
+  try {
+    // 获取 GitHub 远程文件列表（按文件名索引）
+    const githubFiles = await fetchGithubFileList();
+    const githubNames = new Set(githubFiles.map((f) => f.name));
+
+    // 获取本地已审批文件列表
+    const { data: localApproved } = await supabase
+      .from('files')
+      .select('id, filename, original_name, creator, approved_at, category_id')
+      .eq('status', 'approved');
+    const localByName = {};
+    (localApproved || []).forEach((f) => { localByName[f.filename] = f; });
+    const localNames = new Set((localApproved || []).map((f) => f.filename));
+
+    // 待推送：本地有但 GitHub 没有的
+    const toPush = [];
+    localNames.forEach((name) => {
+      if (!githubNames.has(name)) {
+        const lf = localByName[name];
+        toPush.push({ name: name, creator: lf.creator, approved_at: lf.approved_at });
+      }
+    });
+
+    // 待拉取：GitHub 有但本地没有的
+    const toPull = [];
+    githubFiles.forEach((gf) => {
+      if (!localNames.has(gf.name) && !gf.path.startsWith('storage/approved/music/')) {
+        toPull.push({ name: gf.name, size: gf.size, downloadUrl: gf.downloadUrl });
+      }
+    });
+
+    // 已同步：两边都有的
+    const inSync = [];
+    localNames.forEach((name) => {
+      if (githubNames.has(name)) {
+        const lf = localByName[name];
+        inSync.push({ name: name, creator: lf.creator });
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        configured: true,
+        branch: 'main',
+        toPush: toPush,
+        toPull: toPull,
+        inSync: inSync,
+        stats: { toPush: toPush.length, toPull: toPull.length, inSync: inSync.length }
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: '获取 Git 状态失败: ' + e.message });
+  }
+});
+
+// 批量推送待推送文件到 GitHub
+app.post('/api/admin/git/push', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const info = getRepoInfo();
+  if (!info) {
+    return res.status(400).json({ success: false, error: '未配置 REPO_URL 或 GITHUB_TOKEN' });
+  }
+
+  try {
+    // 获取远程文件列表
+    const githubFiles = await fetchGithubFileList();
+    const githubNames = new Set(githubFiles.map((f) => f.name));
+
+    // 获取本地已审批文件
+    const { data: localApproved } = await supabase
+      .from('files')
+      .select('filename')
+      .eq('status', 'approved');
+
+    let pushed = 0;
+    let skipped = 0;
+
+    for (const lf of localApproved || []) {
+      if (githubNames.has(lf.filename)) {
+        skipped++;
+        continue;
+      }
+      const localPath = path.join(APPROVED_DIR, lf.filename);
+      if (!fs.existsSync(localPath)) {
+        skipped++;
+        continue;
+      }
+      const result = await syncToGit(localPath, lf.filename);
+      if (result) pushed++;
+      else skipped++;
+    }
+
+    res.json({
+      success: true,
+      data: { pushed: pushed, skipped: skipped, message: '推送完成: 推送 ' + pushed + ' 个, 跳过 ' + skipped + ' 个' }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: '推送失败: ' + e.message });
+  }
+});
+
+// 从 GitHub 拉取新文件到本地
+app.post('/api/admin/git/pull', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { categoryId } = req.body;
+  if (!categoryId) {
+    return res.status(400).json({ success: false, error: '请选择目标分类' });
+  }
+
+  const { data: category } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('id', parseInt(categoryId))
+    .maybeSingle();
+
+  if (!category) {
+    return res.status(404).json({ success: false, error: '分类不存在' });
+  }
+
+  try {
+    const githubFiles = await fetchGithubFileList();
+
+    const { data: localFiles } = await supabase
+      .from('files')
+      .select('filename')
+      .eq('status', 'approved');
+
+    const localFilenames = new Set((localFiles || []).map((f) => f.filename));
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const ghFile of githubFiles) {
+      if (ghFile.path.startsWith('storage/approved/music/')) continue;
+
+      if (localFilenames.has(ghFile.name)) {
+        skipped++;
+        continue;
+      }
+
+      const localPath = path.join(APPROVED_DIR, ghFile.name);
+      const downloadOk = await downloadFromGithub(ghFile.downloadUrl, localPath);
+      if (!downloadOk) continue;
+
+      const { data: created, error } = await supabase
+        .from('files')
+        .insert({
+          category_id: parseInt(categoryId),
+          filename: ghFile.name,
+          original_name: ghFile.name,
+          creator: 'github',
+          status: 'approved',
+          uploaded_at: new Date().toISOString(),
+          approved_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) continue;
+
+      const stats = fs.statSync(localPath);
+      updateManifest(ghFile.name, {
+        id: created.id,
+        categoryName: category.name,
+        creator: 'github',
+        uploaded_at: created.uploaded_at,
+        size: stats.size
+      });
+
+      await supabase.from('activities').insert({
+        type: 'approve',
+        content: '从 GitHub 拉取了文件「' + ghFile.name + '」到分类「' + category.name + '」',
+        author: req.user.username,
+        related_id: created.id,
+        created_at: new Date().toISOString()
+      });
+
+      imported++;
+    }
+
+    res.json({
+      success: true,
+      data: { imported: imported, skipped: skipped, message: '拉取完成: 导入 ' + imported + ' 个, 跳过 ' + skipped + ' 个' }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: '拉取失败: ' + e.message });
+  }
+});
+
+// 获取 Git 提交日志
+app.get('/api/admin/git/log', authMiddleware, superAuthMiddleware, async (req, res) => {
+  try {
+    const commits = await fetchGithubCommitLog(15);
+    res.json({ success: true, data: commits });
+  } catch (e) {
+    res.status(500).json({ success: false, error: '获取提交日志失败: ' + e.message });
+  }
 });
 
 // 获取当前登录用户的上传记录

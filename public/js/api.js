@@ -67,6 +67,43 @@ async function supabaseQuery(table, queryFn) {
   return { success: true, data: data || [] };
 }
 
+// 直接调用本地服务器 REST API（不通过 Edge Function）
+async function serverRequest(endpoint, options = {}) {
+  const token = localStorage.getItem('token');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: options.method || 'GET',
+      headers: headers,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch (e) {
+    throw new Error('网络连接失败，请检查网络');
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (e) {
+    throw new Error('响应解析失败（HTTP ' + response.status + '）');
+  }
+
+  if (!result.success) {
+    if (result.code === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
+    throw new Error(result.error || '请求失败');
+  }
+
+  return result;
+}
+
 // ===== 认证 =====
 const AuthAPI = {
   login(username, password) {
@@ -401,4 +438,24 @@ const AdminAPI = {
   deleteUser(id) {
     return edgeRequest('delete-user', { id });
   },
+
+  // ===== Git 管理 API =====
+  getGitStatus() {
+    return serverRequest('/api/admin/git/status');
+  },
+
+  gitPush() {
+    return serverRequest('/api/admin/git/push', { method: 'POST' });
+  },
+
+  gitPull(categoryId) {
+    return serverRequest('/api/admin/git/pull', {
+      method: 'POST',
+      body: { categoryId: categoryId }
+    });
+  },
+
+  getGitLog() {
+    return serverRequest('/api/admin/git/log');
+  }
 };
