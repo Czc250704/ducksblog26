@@ -137,7 +137,15 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     file.originalname = fixFileNameEncoding(file.originalname);
-    const allowed = ['.md', '.txt', '.ppt', '.pptx', '.doc', '.docx'];
+    const allowed = [
+      '.md', '.txt', '.pdf',
+      '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp',
+      '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.wma',
+      '.mp4', '.webm', '.avi', '.mov', '.mkv',
+      '.js', '.py', '.html', '.css', '.json', '.xml', '.csv',
+      '.log', '.yaml', '.yml'
+    ];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) {
       cb(null, true);
@@ -744,7 +752,7 @@ app.get('/api/preview/:fileId', async (req, res) => {
     .from('files')
     .select('*, categories!inner(name)')
     .eq('id', parseInt(fileId))
-    .eq('status', 'approved')
+    .neq('status', 'pending')
     .maybeSingle();
 
   if (!file) {
@@ -757,9 +765,35 @@ app.get('/api/preview/:fileId', async (req, res) => {
   }
 
   const ext = path.extname(file.filename).toLowerCase();
-  const isTextFile = ['.md', '.txt'].includes(ext);
-  const isOfficeFile = ['.ppt', '.pptx', '.doc', '.docx'].includes(ext);
-  const content = isTextFile ? fs.readFileSync(filePath, 'utf-8') : null;
+  
+  // 文本类文件（可读文本内容）
+  const textExtensions = ['.md', '.txt', '.log', '.csv', '.xml', '.json',
+                          '.html', '.htm', '.css', '.js', '.ts', '.jsx',
+                          '.tsx', '.vue', '.py', '.java', '.c', '.cpp',
+                          '.h', '.hpp', '.go', '.rs', '.rb', '.php', '.sql',
+                          '.sh', '.bat', '.yaml', '.yml', '.toml', '.ini',
+                          '.conf', '.env', '.gitignore'];
+  const isTextFile = textExtensions.includes(ext);
+  
+  // 二进制类文件（提供下载 URL）
+  const binaryExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp',
+                            '.svg', '.bmp', '.mp3', '.wav', '.ogg', '.m4a',
+                            '.flac', '.aac', '.wma', '.mp4', '.webm', '.avi',
+                            '.mov', '.mkv', '.doc', '.docx', '.ppt', '.pptx',
+                            '.xls', '.xlsx'];
+  const isBinaryFile = binaryExtensions.includes(ext);
+
+  let content = null;
+  if (isTextFile) {
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (e) {
+      content = '';
+    }
+  }
+
+  // 所有已审核文件都可通过 static 路径访问
+  const previewUrl = '/storage/approved/' + encodeURIComponent(file.filename);
 
   res.json({
     success: true,
@@ -768,8 +802,8 @@ app.get('/api/preview/:fileId', async (req, res) => {
       filename: file.original_name,
       type: ext.replace('.', ''),
       content: content,
-      previewUrl: isOfficeFile ? '/storage/approved/' + encodeURIComponent(file.filename) : null,
-      rawPath: isOfficeFile ? '/storage/approved/' + file.filename : null
+      previewUrl: previewUrl,
+      rawPath: '/storage/approved/' + file.filename
     }
   });
 });
@@ -910,7 +944,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ success: false, error: err.message });
   }
   if (err.message === '不支持的文件类型') {
-    return res.status(400).json({ success: false, error: '不支持的文件类型，仅允许：.md / .txt / .ppt / .pptx / .doc / .docx' });
+    return res.status(400).json({ success: false, error: '不支持的文件类型，请上传文档/图片/音频/视频/代码类文件' });
   }
   if (err.message === '不支持的音频格式') {
     return res.status(400).json({ success: false, error: '不支持的音频格式，仅允许：.mp3 / .wav / .ogg / .m4a / .flac' });

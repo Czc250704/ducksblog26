@@ -68,6 +68,7 @@ const Auth = {
     const superSections = [
       'admin-approval-section',
       'admin-manage-categories-section',
+      'admin-announcement-section',
       'admin-user-section'
     ];
 

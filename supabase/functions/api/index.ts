@@ -435,6 +435,76 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ success: true, data: { id } });
       }
 
+      // ===== 创建公告（仅 super） =====
+      case 'create-announcement': {
+        if (!user || user.role !== 'super') return forbidden();
+        const { title, content, startTime, endTime, displayDuration } = data || body;
+        if (!title || !title.trim() || !content || !content.trim()) {
+          return jsonResponse({ success: false, error: '标题和内容不能为空' });
+        }
+        if (!startTime || !endTime) {
+          return jsonResponse({ success: false, error: '请设置展示起止时间' });
+        }
+
+        const { data: ann, error } = await supabase
+          .from('announcements')
+          .insert({
+            title: title.trim(),
+            content: content.trim(),
+            start_time: startTime,
+            end_time: endTime,
+            display_duration: displayDuration || 10,
+            is_active: true,
+            created_by: user.username,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: ann });
+      }
+
+      // ===== 获取所有公告（仅 super，含管理） =====
+      case 'get-announcements': {
+        if (!user || user.role !== 'super') return forbidden();
+
+        const { data: list, error } = await supabase
+          .from('announcements')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: list });
+      }
+
+      // ===== 删除公告（仅 super） =====
+      case 'delete-announcement': {
+        if (!user || user.role !== 'super') return forbidden();
+        const { id } = data || body;
+        if (!id) return jsonResponse({ success: false, error: '缺少公告ID' });
+
+        const { error } = await supabase.from('announcements').delete().eq('id', parseInt(id));
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: { id } });
+      }
+
+      // ===== 获取当前有效的公告（公开） =====
+      case 'get-active-announcement': {
+        const now = new Date().toISOString();
+        const { data: list, error } = await supabase
+          .from('announcements')
+          .select('*')
+          .eq('is_active', true)
+          .lte('start_time', now)
+          .gte('end_time', now)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: list && list.length > 0 ? list[0] : null });
+      }
+
       // ===== 提交贡献者申请 =====
       case 'submit-contributor': {
         const contributorData = data || body;

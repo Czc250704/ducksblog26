@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <link rel="stylesheet" href="css/style.css">
   <script>
-    // 禁用 F12/右键（
+    // 禁用 F12/右键（超级管理员可解除）
     (function(){
       window._SUPER_ADMIN_MODE_ = false;
       document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);
@@ -34,7 +34,7 @@
   <!-- ===== 主界面 ===== -->
   <div id="main-interface">
 
-    <!-- 头部：Mac 风格红绿灯 + 标题 + 登录 -->
+    <!-- 头部：标题 + 登录 -->
     <header class="site-header">
       <h1>Duck's Blog / Public Studio</h1>
       <div class="header-right">
@@ -47,62 +47,121 @@
       </div>
     </header>
 
-    <!-- 主内容区（全宽） -->
-    <main class="main-content">
-      <!-- 分类标签 -->
-      <div id="category-tabs" class="category-row">
-        <span id="category-all-tab" class="category-tab active" onclick="App.currentCategory=null;App.loadFiles();document.querySelectorAll('.category-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">全部</span>
-      </div>
+    <!-- ===== 主体布局：左侧边栏 + 右侧内容区 ===== -->
+    <div class="body-layout">
 
-      <!-- 文件列表 -->
-      <div id="file-list">
-        <div class="empty-state">加载中...</div>
-      </div>
-    </main>
+      <!-- 左侧边栏 -->
+      <aside class="left-sidebar">
+        <!-- 分类导航列表 -->
+        <nav class="sidebar-section sidebar-categories">
+          <div id="sidebar-category-list">
+            <!-- 动态生成分类链接 -->
+          </div>
+        </nav>
 
-    <!-- 底部块区：最新上传 / 动态流 / 音乐播放器（水平排列） -->
-    <section class="bottom-panels">
-      <div class="bottom-panel panel-uploads">
-        <div class="panel-head">
-          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
-          </svg>
-          <h3>最新上传</h3>
+        <!-- 打开的文件 -->
+        <div class="sidebar-section sidebar-opened-files">
+          <h3 class="sidebar-section-title">打开的文件</h3>
+          <div id="opened-files-list" class="sidebar-list">
+            <div class="empty-state-sm">暂无打开文件</div>
+          </div>
         </div>
-        <div id="latest-uploads-list">
-          <div class="empty-state">暂无内容</div>
+
+        <!-- 同级快速切换 -->
+        <div class="sidebar-section sidebar-peer-switch">
+          <h3 class="sidebar-section-title">同级快速切换</h3>
+          <div id="peer-switch-list" class="sidebar-list">
+            <div class="empty-state-sm">选择文件后显示</div>
+          </div>
         </div>
-      </div>
-      <div class="bottom-panel panel-activity">
-        <div class="panel-head">
-          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-          </svg>
-          <h3>动态</h3>
-          <button class="post-dynamic-btn" onclick="App.showPostModal()">发动态</button>
+      </aside>
+
+      <!-- 右侧主内容区 -->
+      <main class="right-main-content">
+
+        <!-- 上半部分：分类卡片区域 -->
+        <div class="cards-area">
+          <div id="category-cards-container" class="category-cards-row">
+            <!-- 动态生成分类卡片 -->
+          </div>
         </div>
-        <div id="activity-feed-list">
-          <div class="empty-state">暂无动态</div>
+
+        <!-- 下半部分：默认三列 / 文件预览（切换显示） -->
+        <!-- ===== 默认视图：三列内容区 ===== -->
+        <div id="default-view" class="three-columns-area">
+
+          <!-- 动态列 -->
+          <section class="content-column column-activity">
+            <h3 class="column-header">动态</h3>
+            <div class="column-body" id="activity-column-body">
+              <div class="empty-state">暂无动态</div>
+            </div>
+          </section>
+
+          <!-- 书库列 -->
+          <section class="content-column column-library">
+            <h3 class="column-header">书库</h3>
+            <div class="column-body" id="library-column-body">
+              <div class="empty-state">暂无文件</div>
+            </div>
+          </section>
+
+          <!-- 音乐播放列 -->
+          <section class="content-column column-music">
+            <h3 class="column-header">音乐播放</h3>
+            <div class="column-body column-music-body">
+              <!-- 播放控制区 -->
+              <div class="music-player-control">
+                <div class="music-controls-row">
+                  <button class="music-ctrl-btn" onclick="App.prevMusic()" title="上一首">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                  </button>
+                  <button class="music-ctrl-btn music-play-btn" id="music-play-btn" onclick="App.togglePlay()" title="播放/暂停">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  </button>
+                  <button class="music-ctrl-btn" onclick="App.nextMusic()" title="下一首">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                  </button>
+                </div>
+                <div class="music-progress-bar" id="music-progress-bar">
+                  <div class="music-progress-fill" id="music-progress-fill"></div>
+                </div>
+              </div>
+              <!-- 当前播放名 -->
+              <div class="now-playing-name" id="now-playing-name">暂无音乐</div>
+              <!-- 音乐列表标题 -->
+              <div class="music-list-label">音乐列表</div>
+              <!-- 音乐列表 -->
+              <div class="music-playlist" id="music-playlist">
+                <div class="empty-state-sm">暂无音乐</div>
+              </div>
+            </div>
+          </section>
+
         </div>
-      </div>
-      <div class="bottom-panel panel-music">
-        <div class="panel-head">
-          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-          </svg>
-          <h3>音乐</h3>
+
+        <!-- ===== 文件预览面板（点击文件后显示，替代三列） ===== -->
+        <div id="preview-panel" class="preview-panel hidden">
+          <div class="preview-panel-header">
+            <div class="preview-panel-title-row">
+              <div class="traffic-lights">
+                <span class="traffic-btn red" onclick="App.closePreviewPanel()" title="关闭"></span>
+                <span class="traffic-btn yellow" onclick="App.minimizePreviewPanel()" title="最小化"></span>
+                <span class="traffic-btn green" onclick="App.maximizePreviewPanel()" title="全屏"></span>
+              </div>
+              <h2 id="preview-panel-title" class="preview-panel-heading">文件预览</h2>
+              <button class="preview-close-btn" onclick="App.closePreviewPanel()" title="关闭">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="preview-panel-body" id="preview-panel-body">
+            <p class="text-gray-400 text-center py-8">加载中...</p>
+          </div>
         </div>
-        <div class="current-song" id="current-song-name">暂无音乐</div>
-        <div class="music-controls">
-          <button class="nav-btn" onclick="App.prevMusic()" title="上一首">&#9664;</button>
-          <button class="play-btn" id="play-btn" onclick="App.togglePlay()">&#9654;</button>
-          <button class="nav-btn" onclick="App.nextMusic()" title="下一首">&#9654;</button>
-        </div>
-        <div class="progress-bar" id="progress-bar">
-          <div class="fill" id="progress-fill"></div>
-        </div>
-      </div>
-    </section>
+
+      </main>
+    </div>
 
     <!-- 底部 macOS 风格 Dock -->
     <div class="dock-wrapper">
@@ -135,6 +194,13 @@
       </nav>
     </div>
 
+    <!-- ===== 发动态悬浮按钮 ===== -->
+    <button id="fab-post-dynamic" class="fab-btn" onclick="App.showPostModal()" title="发动态">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+    </button>
+
     <!-- ===== 管理面板模态框 ===== -->
     <div id="admin-modal" class="modal-overlay hidden">
       <div class="modal-container admin-modal-container">
@@ -149,75 +215,130 @@
           </div>
         </div>
         <div class="modal-body" id="admin-panel-body">
-      <!-- 创建分类 -->
-      <div id="admin-category-section" class="hidden mb-6">
-        <div class="section-title">创建分类</div>
-        <form id="create-category-form">
-          <input type="text" id="create-category-input" placeholder="输入分类名称">
-          <button type="submit" class="btn-primary w-full">创建分类</button>
-        </form>
-      </div>
+          <!-- 创建分类 -->
+          <div id="admin-category-section" class="hidden mb-6">
+            <div class="section-title">创建分类</div>
+            <form id="create-category-form">
+              <input type="text" id="create-category-input" placeholder="输入分类名称">
+              <button type="submit" class="btn-primary w-full">创建分类</button>
+            </form>
+          </div>
 
-      <!-- 上传文件 -->
-      <div id="admin-upload-section" class="hidden mb-6">
-        <div class="section-title">上传文件</div>
-        <form id="upload-file-form">
-          <select id="upload-category-select">
-            <option value="">请选择分类</option>
-          </select>
-          <input type="file" id="upload-file-input" accept=".md,.txt,.ppt,.pptx,.doc,.docx" class="w-full mb-3 text-sm">
-          <button type="submit" class="btn-primary w-full">上传并提交审核</button>
-        </form>
-        <p class="text-gray-400 text-xs mt-1">支持 MD / TXT / PPT / DOC 格式，最大 10MB</p>
-      </div>
+          <!-- 上传文件 -->
+          <div id="admin-upload-section" class="hidden mb-6">
+            <div class="section-title">上传文件</div>
+            <form id="upload-file-form">
+              <select id="upload-category-select">
+                <option value="">请选择分类</option>
+              </select>
+              <input type="file" id="upload-file-input" accept=".md,.txt,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.svg,.mp3,.wav,.ogg,.m4a,.mp4,.webm,.js,.py,.html,.css,.json,.xml,.csv" class="w-full mb-3 text-sm">
+              <button type="submit" class="btn-primary w-full">上传并提交审核</button>
+            </form>
+            <p class="text-gray-400 text-xs mt-1">支持文档/图片/音频/视频/代码等主流格式，最大 10MB</p>
+          </div>
 
-      <!-- 上传音乐 -->
-      <div id="admin-upload-music-section" class="hidden mb-6">
-        <div class="section-title">上传音乐</div>
-        <form id="upload-music-form">
-          <input type="file" id="upload-music-input" accept=".mp3,.wav,.ogg,.m4a,.flac" class="w-full mb-3 text-sm">
-          <button type="submit" class="btn-primary w-full">上传音乐</button>
-        </form>
-        <p class="text-gray-400 text-xs mt-1">支持 MP3 / WAV / OGG 格式，最大 15MB</p>
-      </div>
+          <!-- 上传音乐 -->
+          <div id="admin-upload-music-section" class="hidden mb-6">
+            <div class="section-title">上传音乐</div>
+            <form id="upload-music-form">
+              <input type="file" id="upload-music-input" accept=".mp3,.wav,.ogg,.m4a,.flac" class="w-full mb-3 text-sm">
+              <button type="submit" class="btn-primary w-full">上传音乐</button>
+            </form>
+            <p class="text-gray-400 text-xs mt-1">支持 MP3 / WAV / OGG 格式，最大 15MB</p>
+          </div>
 
-      <!-- 我的上传 -->
-      <div id="admin-my-uploads-section" class="hidden mb-6">
-        <div class="section-title">我的上传记录</div>
-        <div id="my-uploads-list">
-          <div class="empty-state">暂无记录</div>
+          <!-- 我的上传 -->
+          <div id="admin-my-uploads-section" class="hidden mb-6">
+            <div class="section-title">我的上传记录</div>
+            <div id="my-uploads-list">
+              <div class="empty-state">暂无记录</div>
+            </div>
+          </div>
+
+          <!-- 审批列表（仅 super） -->
+          <div id="admin-approval-section" class="hidden mb-6">
+            <div class="flex items-center justify-between mb-2">
+              <div class="section-title section-title-inline">待审批文件</div>
+              <button id="refresh-approval" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+            </div>
+            <div id="pending-files-list">
+              <div class="empty-state">暂无待审批文件</div>
+            </div>
+          </div>
+
+          <!-- 分类管理（仅 super） -->
+          <div id="admin-manage-categories-section" class="hidden mb-6">
+            <div class="section-title">分类管理</div>
+            <div id="admin-categories-list">
+              <div class="empty-state">暂无分类</div>
+            </div>
+          </div>
+
+          <!-- 公告管理（仅 super） -->
+          <div id="admin-announcement-section" class="hidden mb-6">
+            <div class="section-title">发布公告</div>
+            <form id="create-announcement-form">
+              <input type="text" id="ann-title" placeholder="公告标题">
+              <textarea id="ann-content" rows="3" placeholder="公告内容（支持 Markdown 格式）" style="width:100%;padding:0.5rem 0.75rem;border:1px solid #e5e7eb;border-radius:0.5rem;font-size:0.875rem;outline:none;margin-bottom:0.75rem;resize:vertical;"></textarea>
+              <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                <div style="flex:1;">
+                  <label style="font-size:0.75rem;color:#6b7280;display:block;margin-bottom:0.25rem;">开始时间</label>
+                  <input type="datetime-local" id="ann-start-time" style="width:100%;padding:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;font-size:0.8125rem;outline:none;">
+                </div>
+                <div style="flex:1;">
+                  <label style="font-size:0.75rem;color:#6b7280;display:block;margin-bottom:0.25rem;">结束时间</label>
+                  <input type="datetime-local" id="ann-end-time" style="width:100%;padding:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;font-size:0.8125rem;outline:none;">
+                </div>
+              </div>
+              <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;align-items:center;">
+                <div style="flex:1;">
+                  <label style="font-size:0.75rem;color:#6b7280;display:block;margin-bottom:0.25rem;">弹窗展示时长（秒）</label>
+                  <input type="number" id="ann-duration" value="10" min="3" max="60" style="width:100%;padding:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;font-size:0.8125rem;outline:none;">
+                </div>
+                <span style="font-size:0.75rem;color:#9ca3af;padding-top:1.25rem;">3-60 秒</span>
+              </div>
+              <button type="submit" class="btn-primary w-full">发布公告</button>
+            </form>
+            <div style="margin-top:1rem;border-top:1px solid #fff7ed;padding-top:0.75rem;">
+              <div class="flex items-center justify-between mb-2">
+                <div class="section-title section-title-inline" style="font-size:0.9rem;">已发布公告</div>
+                <button id="refresh-announcements" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+              </div>
+              <div id="announcement-list">
+                <div class="empty-state">暂无公告</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 管理员管理（仅 super） -->
+          <div id="admin-user-section" class="hidden mb-6">
+            <div class="flex items-center justify-between mb-2">
+              <div class="section-title section-title-inline">管理员管理</div>
+              <button id="refresh-users" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+            </div>
+            <div id="admin-users-list">
+              <div class="empty-state">暂无数据</div>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <!-- 审批列表（仅 super） -->
-      <div id="admin-approval-section" class="hidden mb-6">
-        <div class="flex items-center justify-between mb-2">
-          <div class="section-title section-title-inline">待审批文件</div>
-          <button id="refresh-approval" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
+    <!-- ===== 公告弹窗 ===== -->
+    <div id="announcement-overlay" class="announcement-overlay hidden">
+      <div class="announcement-container">
+        <div class="announcement-header">
+          <h2 id="announcement-title">公告</h2>
+          <button class="announcement-close-btn" onclick="App.closeAnnouncement()" title="关闭">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
         </div>
-        <div id="pending-files-list">
-          <div class="empty-state">暂无待审批文件</div>
+        <div class="announcement-body" id="announcement-body">
+          加载中...
         </div>
-      </div>
-
-      <!-- 分类管理（仅 super） -->
-      <div id="admin-manage-categories-section" class="hidden mb-6">
-        <div class="section-title">分类管理</div>
-        <div id="admin-categories-list">
-          <div class="empty-state">暂无分类</div>
-        </div>
-      </div>
-
-      <!-- 管理员管理（仅 super） -->
-      <div id="admin-user-section" class="hidden mb-6">
-        <div class="flex items-center justify-between mb-2">
-          <div class="section-title section-title-inline">管理员管理</div>
-          <button id="refresh-users" class="text-sm text-orange-500 hover:text-orange-600">刷新</button>
-        </div>
-        <div id="admin-users-list">
-          <div class="empty-state">暂无数据</div>
-        </div>
-      </div>
+        <div class="announcement-footer">
+          <span class="announcement-timer" id="announcement-timer"></span>
+          <button class="announcement-got-it" onclick="App.closeAnnouncement()">我知道了</button>
         </div>
       </div>
     </div>
@@ -280,15 +401,15 @@
       </div>
     </div>
 
-    <!-- ===== 预览模态框 ===== -->
+    <!-- ===== 全屏预览模态框（仅用于最大化预览） ===== -->
     <div id="preview-overlay" class="modal-overlay hidden">
-      <div class="modal-container">
+      <div class="modal-container modal-fullscreen-preview">
         <div class="modal-header">
           <div class="modal-header-left">
             <div class="traffic-lights">
-              <span class="traffic-btn red" onclick="App.trafficAction('preview-overlay','close');Preview.close()" title="关闭窗口"></span>
-              <span class="traffic-btn yellow" onclick="App.trafficAction('preview-overlay','minimize')" title="最小化"></span>
-              <span class="traffic-btn green" onclick="App.trafficAction('preview-overlay','maximize')" title="全屏"></span>
+              <span class="traffic-btn red" onclick="App.exitFullscreenPreview()" title="关闭窗口"></span>
+              <span class="traffic-btn yellow" title="最小化（暂不可用）"></span>
+              <span class="traffic-btn green" onclick="App.exitFullscreenPreview()" title="退出全屏"></span>
             </div>
             <h2 id="preview-title">文件预览</h2>
           </div>
@@ -336,7 +457,7 @@
               </div>
             </div>
             <div class="about-footer">
-              <p>Public Studio © 2025</p>
+              <p>Public Studio &copy; 2025</p>
             </div>
           </div>
         </div>

@@ -211,27 +211,58 @@ const FileAPI = {
 
     const fileType = file.file_type;
 
-    // 文本类：读取文本内容
-    if (['md', 'txt'].includes(fileType)) {
+    // 文本/标记类：读取文本内容
+    if (['md', 'txt', 'log', 'csv', 'xml', 'json', 'html', 'htm', 'css', 'js', 'ts',
+         'jsx', 'tsx', 'vue', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs',
+         'rb', 'php', 'sql', 'sh', 'bat', 'yaml', 'yml', 'toml', 'ini', 'conf',
+         'env', 'gitignore', 'dockerfile', 'makefile'].includes(fileType)) {
       const text = await proxyResp.text();
       return { success: true, data: { ...file, content: text, type: fileType } };
     }
 
-    // Office 类：生成可访问的 URL（通过 Blob URL 绕过跨域）
-    if (['ppt', 'pptx', 'doc', 'docx'].includes(fileType)) {
+    // PDF：生成 Blob URL 用于 iframe 预览
+    if (['pdf'].includes(fileType)) {
       const blob = await proxyResp.blob();
       const blobUrl = URL.createObjectURL(blob);
       return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
     }
 
-    // 音乐类：生成音频 URL
-    if (fileType === 'music') {
+    // 图片类：生成 Blob URL
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff', 'tif'].includes(fileType)) {
       const blob = await proxyResp.blob();
       const blobUrl = URL.createObjectURL(blob);
       return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
     }
 
-    return { success: true, data: { ...file, type: fileType } };
+    // Office 类：生成可访问的 URL
+    if (['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].includes(fileType)) {
+      const blob = await proxyResp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
+    }
+
+    // 音频类：生成音频 URL
+    if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'].includes(fileType)) {
+      const blob = await proxyResp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
+    }
+
+    // 视频类：生成视频 URL
+    if (['mp4', 'webm', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'm4v'].includes(fileType)) {
+      const blob = await proxyResp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
+    }
+
+    // 其他二进制文件：返回下载链接
+    try {
+      const blob = await proxyResp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
+    } catch (e) {
+      return { success: true, data: { ...file, type: fileType } };
+    }
   },
 };
 
@@ -339,6 +370,25 @@ const MusicAPI = {
 const ContributorAPI = {
   submit(data) {
     return edgeRequest('submit-contributor', data);
+  },
+};
+
+// ===== 公告弹窗 =====
+const AnnouncementAPI = {
+  getAll() {
+    return edgeRequest('get-announcements');
+  },
+
+  getActive() {
+    return edgeRequest('get-active-announcement');
+  },
+
+  create(data) {
+    return edgeRequest('create-announcement', data);
+  },
+
+  delete(id) {
+    return edgeRequest('delete-announcement', { id });
   },
 };
 

@@ -73,6 +73,7 @@ const Admin = {
     this.loadMyUploads();
     if (Auth.isSuperAdmin()) {
       this.loadUsers();
+      this.loadAnnouncements();
     }
   },
 
@@ -312,6 +313,94 @@ const Admin = {
     try {
       await AdminAPI.deleteUser(id);
       this.loadUsers();
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
+  },
+
+  // ===== 公告管理 =====
+
+  async loadAnnouncements() {
+    const container = document.getElementById('announcement-list');
+    if (!container) return;
+    try {
+      const result = await AnnouncementAPI.getAll();
+      if (result.data.length === 0) {
+        container.innerHTML = '<div class="empty-state">暂无公告</div>';
+        return;
+      }
+      const now = new Date().toISOString();
+      container.innerHTML = result.data.map((a) => {
+        const start = a.start_time.slice(0, 16).replace('T', ' ');
+        const end = a.end_time.slice(0, 16).replace('T', ' ');
+        let statusHtml = '';
+        if (!a.is_active) {
+          statusHtml = '<span class="ann-status-badge ann-status-inactive">已暂停</span>';
+        } else if (a.end_time < now) {
+          statusHtml = '<span class="ann-status-badge ann-status-expired">已过期</span>';
+        } else if (a.start_time > now) {
+          statusHtml = '<span class="ann-status-badge ann-status-inactive">待生效</span>';
+        } else {
+          statusHtml = '<span class="ann-status-badge ann-status-active">展示中</span>';
+        }
+        return (
+          '<div class="pending-item">' +
+          '<div class="info">' +
+          '<div class="name">' + a.title + ' ' + statusHtml + '</div>' +
+          '<div class="meta">' + start + ' ~ ' + end + ' / ' + a.display_duration + '秒</div>' +
+          '</div>' +
+          '<div class="actions">' +
+          '<button class="btn-danger" onclick="Admin.deleteAnnouncement(' + a.id + ')">删除</button>' +
+          '</div>' +
+          '</div>'
+        );
+      }).join('');
+    } catch (e) {
+      container.innerHTML = '<div class="empty-state">加载失败</div>';
+    }
+  },
+
+  async createAnnouncement() {
+    const title = document.getElementById('ann-title').value.trim();
+    const content = document.getElementById('ann-content').value.trim();
+    const startTime = document.getElementById('ann-start-time').value;
+    const endTime = document.getElementById('ann-end-time').value;
+    const duration = parseInt(document.getElementById('ann-duration').value) || 10;
+
+    if (!title) { alert('请输入公告标题'); return; }
+    if (!content) { alert('请输入公告内容'); return; }
+    if (!startTime) { alert('请选择开始时间'); return; }
+    if (!endTime) { alert('请选择结束时间'); return; }
+    if (new Date(endTime) <= new Date(startTime)) {
+      alert('结束时间必须晚于开始时间');
+      return;
+    }
+
+    try {
+      await AnnouncementAPI.create({
+        title,
+        content,
+        startTime: new Date(startTime).toISOString(),
+        endTime: new Date(endTime).toISOString(),
+        displayDuration: duration,
+      });
+      document.getElementById('ann-title').value = '';
+      document.getElementById('ann-content').value = '';
+      document.getElementById('ann-start-time').value = '';
+      document.getElementById('ann-end-time').value = '';
+      document.getElementById('ann-duration').value = '10';
+      alert('公告发布成功');
+      this.loadAnnouncements();
+    } catch (e) {
+      alert('发布失败：' + e.message);
+    }
+  },
+
+  async deleteAnnouncement(id) {
+    if (!confirm('确定删除此公告？')) return;
+    try {
+      await AnnouncementAPI.delete(id);
+      this.loadAnnouncements();
     } catch (e) {
       alert('删除失败：' + e.message);
     }
