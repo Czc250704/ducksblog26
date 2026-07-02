@@ -524,13 +524,491 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ success: true, data: record });
       }
 
+      // ===== 获取分类列表（公开） =====
+      case 'get-categories': {
+        const { data: categories, error } = await supabase
+          .from('categories')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: categories });
+      }
+
+      // ===== 获取文件列表（访客只看已审核） =====
+      case 'get-files': {
+        const { categoryId } = data || {};
+        const isAdmin = user && (user.role === 'super' || user.role === 'admin');
+
+        let query = supabase
+          .from('files')
+          .select('*, categories!inner(name)')
+          .order('uploaded_at', { ascending: false });
+
+        if (!isAdmin) {
+          query = query.eq('status', 'approved');
+        }
+
+        if (categoryId) {
+          query = query.eq('category_id', parseInt(categoryId));
+        }
+
+        const { data: files, error } = await query;
+        if (error) return jsonResponse({ success: false, error: error.message });
+
+        return jsonResponse({
+          success: true,
+          data: (files || []).map((f: any) => ({
+            ...f,
+            category_name: f.categories?.name || '',
+          })),
+        });
+      }
+
+      // ===== 获取音乐列表 =====
+      case 'get-music': {
+        const { data: music, error } = await supabase
+          .from('files')
+          .select('*')
+          .eq('file_type', 'music')
+          .eq('status', 'approved')
+          .order('uploaded_at', { ascending: false });
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+
+        // 为每条音乐生成公开 URL
+        const result = (music || []).map((m: any) => {
+          let url = '';
+          if (m.storage_path) {
+            if (m.storage_path.startsWith('https://')) {
+              url = m.storage_path;
+            } else {
+              const { data: urlData } = supabase.storage
+                .from('blog-music')
+                .getPublicUrl(m.storage_path);
+              url = urlData?.publicUrl || '';
+            }
+          }
+          return {
+            id: m.id,
+            name: m.original_name,
+            url: url,
+          };
+        });
+
+        return jsonResponse({ success: true, data: result });
+      }
+
+      // ===== 获取动态列表（含评论数） =====
+      case 'get-activities': {
+        const { data: activities, error } = await supabase
+          .from('activities')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+
+        const activitiesWithCounts = await Promise.all(
+          (activities || []).map(async (a: any) => {
+            const { count } = await supabase
+              .from('comments')
+              .select('*', { count: 'exact', head: true })
+              .eq('activity_id', a.id);
+            return { ...a, commentCount: count || 0 };
+          })
+        );
+
+        return jsonResponse({ success: true, data: activitiesWithCounts });
+      }
+
+      // ===== 创建动态（无需登录） =====
+      case 'create-activity': {
+        const { content, author } = data || {};
+        if (!content || !content.trim()) {
+          return jsonResponse({ success: false, error: '内容不能为空' });
+        }
+        const finalAuthor = (author && author.trim()) ? author.trim() : '匿名访客';
+
+        const { data: created, error } = await supabase
+          .from('activities')
+          .insert({
+            type: 'comment',
+            content: content.trim(),
+            author: finalAuthor,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: { id: created.id } });
+      }
+
+      // ===== 获取评论 =====
+      case 'get-comments': {
+        const { activityId } = data || {};
+        if (!activityId) return jsonResponse({ success: false, error: '缺少活动ID' });
+
+        const { data: comments, error } = await supabase
+          .from('comments')
+          .select('*')
+          .eq('activity_id', parseInt(activityId))
+          .order('created_at', { ascending: true });
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: comments });
+      }
+
+      // ===== 创建评论（无需登录） =====
+      case 'create-comment': {
+        const { activityId, content, author } = data || {};
+        if (!activityId || !content || !content.trim()) {
+          return jsonResponse({ success: false, error: '参数不完整' });
+        }
+
+        const { data: activity } = await supabase
+          .from('activities')
+          .select('id')
+          .eq('id', parseInt(activityId))
+          .maybeSingle();
+
+        if (!activity) return jsonResponse({ success: false, error: '动态不存在' });
+
+        const commentAuthor = (author && author.trim()) ? author.trim() : '匿名访客';
+
+        const { data: created, error } = await supabase
+          .from('comments')
+          .insert({
+            activity_id: parseInt(activityId),
+            content: content.trim(),
+            author: commentAuthor,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: { id: created.id } });
+      }
+
+      // ===== 文件预览 =====
+      case 'preview-file': {
+        const { fileId } = data || {};
+        if (!fileId) return jsonResponse({ success: false, error: '缺少文件ID' });
+
+        const { data: file } = await supabase
+          .from('files')
+          .select('*, categories!inner(name)')
+          .eq('id', parseInt(fileId))
+          .neq('status', 'pending')
+          .maybeSingle();
+
+        if (!file) return jsonResponse({ success: false, error: '文件不存在' }, 404);
+
+        const ext = (file.file_type || file.filename?.split('.').pop() || '').toLowerCase();
+        const textExtensions = ['md', 'txt', 'log', 'csv', 'xml', 'json', 'html', 'htm', 'css', 'js', 'ts',
+          'jsx', 'tsx', 'vue', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs', 'rb', 'php', 'sql', 'sh',
+          'bat', 'yaml', 'yml', 'toml', 'ini', 'conf', 'env', 'gitignore'];
+
+        const isTextFile = textExtensions.includes(ext);
+        let content: string | null = null;
+
+        // 尝试读取文件内容
+        if (isTextFile && file.storage_path) {
+          try {
+            if (file.storage_path.startsWith('https://')) {
+              const resp = await fetch(file.storage_path);
+              if (resp.ok) content = await resp.text();
+            } else {
+              const { data: blob } = await supabase.storage
+                .from(file.file_type === 'music' ? 'blog-music' : 'blog-files')
+                .download(file.storage_path);
+              if (blob) content = await blob.text();
+            }
+          } catch (e) {}
+        }
+
+        // 生成预览/下载 URL
+        let previewUrl = '';
+        if (file.storage_path) {
+          if (file.storage_path.startsWith('https://')) {
+            previewUrl = file.storage_path;
+          } else {
+            const bucket = file.file_type === 'music' ? 'blog-music' : 'blog-files';
+            const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(file.storage_path);
+            previewUrl = urlData?.publicUrl || '';
+          }
+        }
+
+        return jsonResponse({
+          success: true,
+          data: {
+            id: file.id,
+            filename: file.original_name,
+            type: ext,
+            content: content,
+            previewUrl: previewUrl,
+          },
+        });
+      }
+
+      // ===== 获取贡献者申请列表 =====
+      case 'get-contributors': {
+        if (!user || user.role !== 'super') return forbidden();
+        const { type, status } = data || {};
+
+        let query = supabase.from('contributors').select('*');
+        if (type) query = query.eq('type', type);
+        if (status) query = query.eq('status', status);
+
+        const { data: list, error } = await query.order('created_at', { ascending: false });
+        if (error) return jsonResponse({ success: false, error: error.message });
+        return jsonResponse({ success: true, data: list });
+      }
+
+      // ===== 审批贡献者 =====
+      case 'approve-contributor': {
+        if (!user || user.role !== 'super') return forbidden();
+        const { id } = data || {};
+        if (!id) return jsonResponse({ success: false, error: '缺少申请ID' });
+
+        const { data: application } = await supabase
+          .from('contributors')
+          .select('*')
+          .eq('id', parseInt(id))
+          .maybeSingle();
+
+        if (!application) return jsonResponse({ success: false, error: '申请不存在' }, 404);
+
+        await supabase.from('contributors').update({ status: 'approved' }).eq('id', parseInt(id));
+        return jsonResponse({ success: true, data: { message: '已通过' } });
+      }
+
+      // ===== Git 状态 =====
+      case 'git-status': {
+        if (!user || user.role !== 'super') return forbidden();
+        if (!GITHUB_TOKEN) {
+          return jsonResponse({ success: true, data: { configured: false, message: '未配置 GITHUB_TOKEN' } });
+        }
+
+        try {
+          // 获取 GitHub 远程文件列表
+          const ghResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/storage/approved`, {
+            headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'User-Agent': 'ducksblog' },
+          });
+
+          const githubNames = new Set<string>();
+          if (ghResp.ok) {
+            const items = await ghResp.json() as any[];
+            items.filter((i: any) => i.type === 'file').forEach((i: any) => githubNames.add(i.name));
+          }
+
+          // 获取本地已审批文件
+          const { data: localApproved } = await supabase
+            .from('files')
+            .select('id, filename, original_name, creator, approved_at')
+            .eq('status', 'approved');
+
+          const localByName: Record<string, any> = {};
+          const localNames = new Set<string>();
+          (localApproved || []).forEach((f: any) => { localByName[f.filename] = f; localNames.add(f.filename); });
+
+          const toPush: any[] = [];
+          localNames.forEach((name) => {
+            if (!githubNames.has(name)) {
+              const lf = localByName[name];
+              toPush.push({ name, creator: lf.creator, approved_at: lf.approved_at });
+            }
+          });
+
+          const inSync: any[] = [];
+          localNames.forEach((name) => {
+            if (githubNames.has(name)) inSync.push({ name, creator: localByName[name].creator });
+          });
+
+          const count = { toPush: toPush.length, inSync: inSync.length };
+
+          return jsonResponse({
+            success: true,
+            data: { configured: true, branch: 'main', toPush, inSync, stats: count },
+          });
+        } catch (e: any) {
+          return jsonResponse({ success: false, error: '获取 Git 状态失败: ' + e.message });
+        }
+      }
+
+      // ===== Git 推送 =====
+      case 'git-push': {
+        if (!user || user.role !== 'super') return forbidden();
+        if (!GITHUB_TOKEN) return jsonResponse({ success: false, error: '未配置 GITHUB_TOKEN' });
+
+        try {
+          // 获取远程文件列表
+          const ghResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/storage/approved`, {
+            headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'User-Agent': 'ducksblog' },
+          });
+
+          const githubNames = new Set<string>();
+          if (ghResp.ok) {
+            const items = await ghResp.json() as any[];
+            items.filter((i: any) => i.type === 'file').forEach((i: any) => githubNames.add(i.name));
+          }
+
+          // 本地已审批文件
+          const { data: localApproved } = await supabase
+            .from('files')
+            .select('id, filename, original_name, storage_path, file_type')
+            .eq('status', 'approved');
+
+          let pushed = 0;
+          let skipped = 0;
+
+          for (const f of localApproved || []) {
+            if (githubNames.has(f.filename)) { skipped++; continue; }
+            if (!f.storage_path) { skipped++; continue; }
+
+            // 下载文件内容
+            let fileBuffer: ArrayBuffer | null = null;
+
+            if (f.storage_path.startsWith('https://')) {
+              const resp = await fetch(f.storage_path);
+              if (resp.ok) fileBuffer = await resp.arrayBuffer();
+            } else {
+              const bucket = f.file_type === 'music' ? 'blog-music' : 'blog-files';
+              const { data: blob } = await supabase.storage.from(bucket).download(f.storage_path);
+              if (blob) fileBuffer = await blob.arrayBuffer();
+            }
+
+            if (!fileBuffer) { skipped++; continue; }
+
+            const uint8 = new Uint8Array(fileBuffer);
+            const binary = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
+            const base64 = btoa(binary);
+
+            const ghPushResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/storage/approved/${f.filename}`, {
+              method: 'PUT',
+              headers: { Authorization: `token ${GITHUB_TOKEN}`, 'Content-Type': 'application/json', 'User-Agent': 'ducksblog' },
+              body: JSON.stringify({ message: `approve: ${f.original_name}`, content: base64, branch: 'main' }),
+            });
+
+            if (ghPushResp.ok) pushed++;
+            else skipped++;
+          }
+
+          return jsonResponse({
+            success: true,
+            data: { pushed, skipped, message: `推送完成: 推送 ${pushed} 个, 跳过 ${skipped} 个` },
+          });
+        } catch (e: any) {
+          return jsonResponse({ success: false, error: '推送失败: ' + e.message });
+        }
+      }
+
+      // ===== Git 拉取 =====
+      case 'git-pull': {
+        if (!user || user.role !== 'super') return forbidden();
+        const { categoryId } = data || {};
+        if (!categoryId) return jsonResponse({ success: false, error: '请选择目标分类' });
+
+        const { data: category } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('id', parseInt(categoryId))
+          .maybeSingle();
+
+        if (!category) return jsonResponse({ success: false, error: '分类不存在' }, 404);
+
+        try {
+          const ghResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/storage/approved`, {
+            headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'User-Agent': 'ducksblog' },
+          });
+
+          const githubFiles: any[] = ghResp.ok ? (await ghResp.json()).filter((i: any) => i.type === 'file') : [];
+
+          const { data: localFiles } = await supabase.from('files').select('filename').eq('status', 'approved');
+          const localFilenames = new Set((localFiles || []).map((f: any) => f.filename));
+
+          let imported = 0;
+          let skipped = 0;
+
+          for (const gf of githubFiles) {
+            if (localFilenames.has(gf.name)) { skipped++; continue; }
+
+            // 下载文件到 Supabase Storage
+            const fileResp = await fetch(gf.download_url);
+            if (!fileResp.ok) continue;
+            const fileBlob = await fileResp.blob();
+
+            const storagePath = gf.name;
+            const { error: uploadErr } = await supabase.storage
+              .from('blog-files')
+              .upload(storagePath, fileBlob, { upsert: true });
+
+            if (uploadErr) continue;
+
+            const { error: dbErr } = await supabase.from('files').insert({
+              category_id: parseInt(categoryId),
+              filename: gf.name,
+              original_name: gf.name,
+              creator: 'github',
+              status: 'approved',
+              uploaded_at: new Date().toISOString(),
+              approved_at: new Date().toISOString(),
+              storage_path: storagePath,
+              size: gf.size || 0,
+              file_type: gf.name.split('.').pop() || '',
+            });
+
+            if (!dbErr) {
+              await supabase.from('activities').insert({
+                type: 'approve',
+                content: `从 GitHub 拉取了文件「${gf.name}」到分类「${categoryId}」`,
+                author: user.username,
+                created_at: new Date().toISOString(),
+              });
+              imported++;
+            }
+          }
+
+          return jsonResponse({
+            success: true,
+            data: { imported, skipped, message: `拉取完成: 导入 ${imported} 个, 跳过 ${skipped} 个` },
+          });
+        } catch (e: any) {
+          return jsonResponse({ success: false, error: '拉取失败: ' + e.message });
+        }
+      }
+
+      // ===== Git 提交日志 =====
+      case 'git-log': {
+        if (!user || user.role !== 'super') return forbidden();
+
+        try {
+          const ghResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits?sha=main&per_page=15`, {
+            headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'User-Agent': 'ducksblog' },
+          });
+
+          if (!ghResp.ok) return jsonResponse({ success: true, data: [] });
+
+          const commits = (await ghResp.json() as any[]).map((c: any) => ({
+            sha: c.sha.substring(0, 7),
+            message: c.commit.message,
+            author: c.commit.author.name,
+            date: c.commit.author.date,
+          }));
+
+          return jsonResponse({ success: true, data: commits });
+        } catch (e: any) {
+          return jsonResponse({ success: false, error: '获取提交日志失败: ' + e.message });
+        }
+      }
+
       // ===== 文件代理下载（解决浏览器 CORS / 跨域问题） =====
-      // 服务端从 Supabase Storage 或 GitHub 读取文件，返回原始内容给前端
       case 'proxy-file': {
         const fileId = data?.fileId || (body as any)?.fileId;
         if (!fileId) return jsonResponse({ success: false, error: '缺少文件ID' }, 400);
 
-        // 查询文件记录
         const { data: fileRecord, error: dbError } = await supabase
           .from('files')
           .select('*')
@@ -553,22 +1031,15 @@ Deno.serve(async (req: Request) => {
           } catch(e) {}
         }
 
-        // 尝试2：GitHub URL 下载（支持 blob/raw/jsdelivr 三种格式）
+        // 尝试2：GitHub URL 下载
         if (!fileContent && sp.startsWith('https://')) {
           try {
             let downloadUrl = sp;
 
-            // blob 页面 → raw 内容 URL
             const blobMatch = sp.match(/github\.com\/[^/]+\/[^/]+\/blob\/([^/]+)\/(.+)/);
             if (blobMatch) {
               const repo = sp.match(/github\.com\/([^/]+\/[^/]+)/)?.[1];
               downloadUrl = `https://raw.githubusercontent.com/${repo}/${blobMatch[1]}/${blobMatch[2]}`;
-            }
-            
-            // jsdelivr → raw
-            const jsdMatch = sp.match(/jsdelivr\.net\/gh\/([^@]+)@([^/]+)\/(.+)/);
-            if (jsdMatch) {
-              downloadUrl = `https://raw.githubusercontent.com/${jsdMatch[1]}/${jsdMatch[2]}/${jsdMatch[3]}`;
             }
 
             const resp = await fetch(downloadUrl);
@@ -577,14 +1048,9 @@ Deno.serve(async (req: Request) => {
         }
 
         if (!fileContent) {
-          return jsonResponse({
-            success: false,
-            error: '文件不可用，可能尚未同步完成',
-            _debug_storage_path: sp, // 方便调试
-          }, 503);
+          return jsonResponse({ success: false, error: '文件不可用，可能尚未同步完成' }, 503);
         }
 
-        // 根据文件类型设置 Content-Type
         const ext = fileRecord.file_type || sp.split('.').pop() || '';
         const contentTypes: Record<string, string> = {
           md: 'text/markdown; charset=utf-8',
@@ -599,7 +1065,6 @@ Deno.serve(async (req: Request) => {
         };
         const contentType = contentTypes[ext] || 'application/octet-stream';
 
-        // 返回原始文件内容（非 JSON）
         return new Response(fileContent, {
           status: 200,
           headers: {
