@@ -107,199 +107,122 @@ async function serverRequest(endpoint, options = {}) {
 // ===== 认证 =====
 const AuthAPI = {
   login(username, password) {
-    return edgeRequest('login', { username, password });
+    return serverRequest('/api/login', {
+      method: 'POST',
+      body: { username, password }
+    });
   },
 };
 
 // ===== 分类 =====
 const CategoryAPI = {
   async getAll() {
-    return supabaseQuery('categories', {
-      order: { column: 'created_at', ascending: false }
-    });
+    return serverRequest('/api/categories');
   },
 
   create(name) {
-    return edgeRequest('create-category', { name });
+    return serverRequest('/api/categories', {
+      method: 'POST',
+      body: { name }
+    });
   },
 
   delete(id) {
-    return edgeRequest('delete-category', { id });
+    return serverRequest('/api/categories/' + id, {
+      method: 'DELETE'
+    });
   },
 };
 
 // ===== 文件 =====
 const FileAPI = {
   async getAll(categoryId) {
-    const q = {
-      select: '*, categories(name)',
-      order: { column: 'approved_at', ascending: false }
-    };
-    if (categoryId) {
-      q.eq = { category_id: categoryId };
-    }
-    const result = await supabaseQuery('files', q);
+    let url = '/api/files';
+    if (categoryId) url += '?categoryId=' + categoryId;
+    const result = await serverRequest(url);
     // 转换数据格式保持兼容
-    result.data = result.data.map(f => ({
+    result.data = (result.data || []).map(f => ({
       ...f,
-      category_name: f.categories?.name || '',
+      category_name: f.category_name || '',
     }));
     return result;
   },
 
-  // 上传文件：先上传到 Storage，再通过 Edge Function 创建 DB 记录
+  // 上传文件：通过 FormData 直接上传到本地服务器
   async upload(file, categoryId) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const storagePath = dateStr + '_' + Date.now() + '.' + ext;
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('categoryId', categoryId);
 
-    // Step 1: 上传到 Supabase Storage
-    const { error: uploadError } = await sb.storage
-      .from('blog-files')
-      .upload(storagePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (uploadError) throw new Error('文件上传失败：' + uploadError.message);
-
-    // Step 2: 创建数据库记录
-    return edgeRequest('create-file-record', {
-      filename: storagePath,
-      originalName: file.name,
-      categoryId: parseInt(categoryId),
-      storagePath: storagePath,
-      size: file.size,
-      fileType: ext,
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: formData
     });
+
+    if (!response.ok) {
+      let errData;
+      try { errData = await response.json(); } catch(e) {}
+      throw new Error(errData?.error || '上传失败 (HTTP ' + response.status + ')');
+    }
+    return await response.json();
   },
 
   // 上传音乐
   async uploadMusic(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const storagePath = dateStr + '_music_' + Date.now() + '.' + ext;
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', file);
 
-    const { error: uploadError } = await sb.storage
-      .from('blog-music')
-      .upload(storagePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (uploadError) throw new Error('音乐上传失败：' + uploadError.message);
-
-    return edgeRequest('create-music-record', {
-      name: file.name,
-      storagePath: storagePath,
-      size: file.size,
+    const response = await fetch('/api/upload-music', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: formData
     });
+
+    if (!response.ok) {
+      let errData;
+      try { errData = await response.json(); } catch(e) {}
+      throw new Error(errData?.error || '上传失败 (HTTP ' + response.status + ')');
+    }
+    return await response.json();
   },
 
   getPending() {
-    return edgeRequest('get-pending');
+    return serverRequest('/api/admin/pending');
   },
 
   approve(id) {
-    return edgeRequest('approve-file', { id });
+    return serverRequest('/api/admin/approve/' + id, { method: 'POST' });
   },
 
   reject(id) {
-    return edgeRequest('reject-file', { id });
+    return serverRequest('/api/admin/reject/' + id, { method: 'DELETE' });
   },
 
   getMyUploads() {
-    return edgeRequest('get-my-uploads');
+    return serverRequest('/api/my-uploads');
   },
 
-  // 获取文件预览内容（全部走 Edge Function 代理，零 CORS 零编码问题）
+  // 获取文件预览内容（走本地 API）
   async preview(fileId) {
-    const { data: file } = await sb
-      .from('files')
-      .select('*')
-      .eq('id', fileId)
-      .neq('status', 'pending')
-      .single();
+    const result = await serverRequest('/api/preview/' + fileId);
+    const file = result.data;
 
-    if (!file) throw new Error('文件不存在');
+    // 根据类型处理预览
+    const fileType = file.type;
+    const textTypes = ['md', 'txt', 'log', 'csv', 'xml', 'json', 'html', 'htm',
+                       'css', 'js', 'ts', 'jsx', 'tsx', 'vue', 'py', 'java', 'c',
+                       'cpp', 'h', 'hpp', 'go', 'rs', 'rb', 'php', 'sql', 'sh',
+                       'bat', 'yaml', 'yml', 'toml', 'ini', 'conf', 'env'];
 
-    // Edge Function 代理下载：服务端从 Storage/GitHub 获取内容返回
-    const proxyUrl = EDGE_BASE + '/api';
-    const proxyResp = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'proxy-file', data: { fileId } }),
-    });
-
-    if (!proxyResp.ok) {
-      let errBody;
-      try { errBody = await proxyResp.json(); } catch(e) {}
-      throw new Error(errBody?.error || '代理请求失败 (HTTP ' + proxyResp.status + ')');
-    }
-
-    // 检查是否返回了 JSON 错误（如 503）
-    const contentType = proxyResp.headers.get('Content-Type') || '';
-    if (contentType.includes('application/json')) {
-      const jsonResult = await proxyResp.json();
-      if (!jsonResult.success) {
-        throw new Error(jsonResult.error || '文件不可用');
-      }
-    }
-
-    const fileType = file.file_type;
-
-    // 文本/标记类：读取文本内容
-    if (['md', 'txt', 'log', 'csv', 'xml', 'json', 'html', 'htm', 'css', 'js', 'ts',
-         'jsx', 'tsx', 'vue', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs',
-         'rb', 'php', 'sql', 'sh', 'bat', 'yaml', 'yml', 'toml', 'ini', 'conf',
-         'env', 'gitignore', 'dockerfile', 'makefile'].includes(fileType)) {
-      const text = await proxyResp.text();
-      return { success: true, data: { ...file, content: text, type: fileType } };
-    }
-
-    // PDF：生成 Blob URL 用于 iframe 预览
-    if (['pdf'].includes(fileType)) {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    }
-
-    // 图片类：生成 Blob URL
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff', 'tif'].includes(fileType)) {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    }
-
-    // Office 类：生成可访问的 URL
-    if (['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].includes(fileType)) {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    }
-
-    // 音频类：生成音频 URL
-    if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'].includes(fileType)) {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    }
-
-    // 视频类：生成视频 URL
-    if (['mp4', 'webm', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'm4v'].includes(fileType)) {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    }
-
-    // 其他二进制文件：返回下载链接
-    try {
-      const blob = await proxyResp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return { success: true, data: { ...file, previewUrl: blobUrl, type: fileType, _blobUrl: blobUrl } };
-    } catch (e) {
+    if (textTypes.includes(fileType)) {
       return { success: true, data: { ...file, type: fileType } };
     }
+
+    // 其他类型：返回预览 URL
+    return { success: true, data: { ...file, type: fileType } };
   },
 };
 
@@ -376,67 +299,51 @@ const CommentAPI = {
 // ===== 音乐 =====
 const MusicAPI = {
   async getList() {
-    const { data, error } = await sb
-      .from('files')
-      .select('*')
-      .eq('file_type', 'music')
-      .eq('status', 'approved')
-      .order('uploaded_at', { ascending: false });
-
-    if (error) throw new Error(error.message);
-
-    // 生成公开 URL
-    return {
-      success: true,
-      data: (data || []).map((m) => {
-        const { data: urlData } = sb.storage
-          .from('blog-music')
-          .getPublicUrl(m.storage_path);
-
-        return {
-          id: m.id,
-          name: m.original_name,
-          url: urlData.publicUrl,
-        };
-      }),
-    };
+    const result = await serverRequest('/api/music');
+    return result;
   },
 };
 
 // ===== 贡献者申请 =====
 const ContributorAPI = {
   submit(data) {
-    return edgeRequest('submit-contributor', data);
+    return serverRequest('/api/contributors', {
+      method: 'POST',
+      body: data
+    });
   },
 };
 
 // ===== 公告弹窗 =====
 const AnnouncementAPI = {
   getAll() {
-    return edgeRequest('get-announcements');
+    return serverRequest('/api/admin/announcements');
   },
 
   getActive() {
-    return edgeRequest('get-active-announcement');
+    return serverRequest('/api/admin/announcements/active');
   },
 
   create(data) {
-    return edgeRequest('create-announcement', data);
+    return serverRequest('/api/admin/announcements', {
+      method: 'POST',
+      body: data
+    });
   },
 
   delete(id) {
-    return edgeRequest('delete-announcement', { id });
+    return serverRequest('/api/admin/announcements/' + id, { method: 'DELETE' });
   },
 };
 
 // ===== 管理员管理 =====
 const AdminAPI = {
   getUsers() {
-    return edgeRequest('get-users');
+    return serverRequest('/api/admin/users');
   },
 
   deleteUser(id) {
-    return edgeRequest('delete-user', { id });
+    return serverRequest('/api/admin/users/' + id, { method: 'DELETE' });
   },
 
   // ===== Git 管理 API =====

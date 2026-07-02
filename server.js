@@ -1281,6 +1281,80 @@ app.post('/api/contributors/:id/approve', authMiddleware, superAuthMiddleware, a
   res.json({ success: true, data: { message: '已通过' } });
 });
 
+// ========== 公告管理 API（仅 super） ==========
+
+// 创建公告
+app.post('/api/admin/announcements', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { title, content, startTime, endTime, displayDuration } = req.body;
+  if (!title || !title.trim() || !content || !content.trim()) {
+    return res.status(400).json({ success: false, error: '标题和内容不能为空' });
+  }
+  if (!startTime || !endTime) {
+    return res.status(400).json({ success: false, error: '请设置展示起止时间' });
+  }
+
+  const { data: created, error } = await supabase
+    .from('announcements')
+    .insert({
+      title: title.trim(),
+      content: content.trim(),
+      start_time: startTime,
+      end_time: endTime,
+      display_duration: displayDuration || 10,
+      is_active: true,
+      created_by: req.user.username,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+  res.status(201).json({ success: true, data: created });
+});
+
+// 获取所有公告列表（管理用）
+app.get('/api/admin/announcements', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { data: list, error } = await supabase
+    .from('announcements')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+  res.json({ success: true, data: list });
+});
+
+// 获取当前有效公告（公开）
+app.get('/api/admin/announcements/active', async (req, res) => {
+  const now = new Date().toISOString();
+  const { data: list, error } = await supabase
+    .from('announcements')
+    .select('*')
+    .eq('is_active', true)
+    .lte('start_time', now)
+    .gte('end_time', now)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+  res.json({ success: true, data: list && list.length > 0 ? list[0] : null });
+});
+
+// 删除公告
+app.delete('/api/admin/announcements/:id', authMiddleware, superAuthMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from('announcements').delete().eq('id', parseInt(id));
+  if (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+  res.json({ success: true, data: { id: parseInt(id) } });
+});
+
 // 全局错误处理
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {

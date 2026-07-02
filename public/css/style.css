@@ -19,8 +19,8 @@ body {
   width: 220px;
   min-width: 180px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, #fef3e7 0%, #fde9d5 100%);
-  border-right: 1px solid #f5d1ae;
+  background: linear-gradient(180deg, #fef3e7d8 0%, #fde9d5 100%);
+  border-right: 1px solid #ffca96;
   display: flex;
   flex-direction: column;
   padding: 16px 12px;
@@ -35,7 +35,7 @@ body {
 .sidebar-section-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #431407;
+  color: #722915;
   margin-bottom: 10px;
   padding-bottom: 6px;
   border-bottom: 1px solid #f5d1ae;
@@ -62,7 +62,7 @@ body {
 
 .sidebar-cat-link:hover {
   background: rgba(249, 115, 22, 0.08);
-  color: #c2410c;
+  color: #e05017;
 }
 
 .sidebar-cat-link.active {
@@ -125,7 +125,7 @@ body {
   gap: 6px;
   padding: 5px 8px;
   font-size: 0.75rem;
-  color: #78716c;
+  color: #96897f;
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.15s;
@@ -173,7 +173,7 @@ body {
   max-width: 200px;
   flex: 1 1 0;
   padding: 18px 20px;
-  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+  background: linear-gradient(135deg, #fed7aa 0%, #ff8503 100%);
   border-radius: 16px;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
@@ -190,7 +190,7 @@ body {
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0);
 }
 
 .cat-card:hover {
@@ -199,8 +199,8 @@ body {
 }
 
 .cat-card.active {
-  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-  border-color: #c2410c;
+  background: linear-gradient(135deg, #ff6b02 0%, #ff6b02 100%);
+  border-color: #ff6b02;
   box-shadow: 0 4px 14px rgba(249, 115, 22, 0.3);
 }
 
@@ -269,7 +269,7 @@ body {
   padding: 12px;
   /* 自定义滚动条 */
   scrollbar-width: thin;
-  scrollbar-color: #fdba74 transparent;
+  scrollbar-color: #fc8404 transparent;
 }
 
 .column-body::-webkit-scrollbar {
@@ -281,7 +281,7 @@ body {
 }
 
 .column-body::-webkit-scrollbar-thumb {
-  background: #fdba74;
+  background: #f1b06a;
   border-radius: 3px;
 }
 
